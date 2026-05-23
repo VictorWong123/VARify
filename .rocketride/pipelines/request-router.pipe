@@ -1,0 +1,45 @@
+{
+	"components": [
+		{
+			"id": "input",
+			"provider": "webhook",
+			"config": {}
+		},
+		{
+			"id": "llm_router",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 4000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.3,
+				"system_prompt": "Analyze the input and route it to the appropriate handler. Output: REFEREE_DECISION, RULE_CHECK, VIDEO_ANALYSIS, or CONFIDENCE_VERIFICATION"
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "input"
+				}
+			]
+		},
+		{
+			"id": "output",
+			"provider": "response_text",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "llm_router"
+				}
+			]
+		}
+	],
+	"project_id": "f6a7b8c9-dae4-4cec-a4b5-c6d7e8f9a0b1",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}

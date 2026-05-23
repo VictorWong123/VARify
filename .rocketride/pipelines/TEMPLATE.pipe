@@ -1,0 +1,44 @@
+{
+	"components": [
+		{
+			"id": "input",
+			"provider": "webhook",
+			"config": {}
+		},
+		{
+			"id": "processor",
+			"provider": "llm",
+			"config": {
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"provider": "gmi-h100",
+				"temperature": 0.7,
+				"max_tokens": 2000,
+				"system_prompt": "You are a helpful assistant."
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "input"
+				}
+			]
+		},
+		{
+			"id": "output",
+			"provider": "response_text",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "processor"
+				}
+			]
+		}
+	],
+	"project_id": "00000000-0000-0000-0000-000000000000",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}
