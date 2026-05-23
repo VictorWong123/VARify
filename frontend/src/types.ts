@@ -1,37 +1,17 @@
-export type DecisionType = 'RED_CARD' | 'YELLOW_CARD' | 'NO_CARD';
-export type RuleCategoryType = 'careless' | 'reckless' | 'excessive force' | 'no offense';
+export type Decision = 'Yellow Card' | 'Red Card' | 'No Card';
 
-export interface EvidenceMoment {
-  timestamp: string;
-  description: string;
-  videoIndex?: number | null;
-  videoLabel?: string | null;
-  timestampSeconds?: number | null;
-}
-
-export interface ModelTrace {
-  videoAnalyzer?: string;
-  orchestrator?: string;
-  decisionModel?: string;
-  [key: string]: unknown;
-}
-
-export interface VARifyResult {
-  decision: DecisionType;
-  confidence: number;
-  keyTimestamp?: string;
-  keyTimestamps?: string[];
-  keyMoments?: EvidenceMoment[];
-  ruleCategory: RuleCategoryType;
-  explanation: string;
-  evidence: EvidenceMoment[];
-  geminiSummary?: string;
-  modelTrace?: ModelTrace;
-}
-
-export interface AngleEntry {
-  id: string;
-  file: File;
+export interface AnalyzeTimestamps {
+  start: string;
+  end: string;
   label: string;
-  url: string;
+}
+
+export interface AnalyzeResult {
+  decision: Decision;
+  decisionSubtitle: string;
+  reasoning: string;
+  timestamps: AnalyzeTimestamps;
+  confidence: number;
+  originalClipUrl?: string;
+  aiReviewVideoUrl?: string;
 }
