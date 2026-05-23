@@ -5,6 +5,8 @@ import com.varify.backend.dto.RefereeDecisionResponse;
 import com.varify.backend.dto.VideoUpload;
 import com.varify.backend.dto.VideoAnalysisResult;
 import com.varify.backend.exception.ModelConfigurationException;
+import com.varify.backend.rocketride.RocketRidePipelineService;
+import com.varify.backend.rocketride.RocketRideProperties;
 import java.util.List;
 import org.springframework.stereotype.Service;
 
@@ -13,21 +15,31 @@ public class RefereeDecisionService {
 
     private final VideoAnalysisService videoAnalysisService;
     private final GmiDecisionClient gmiDecisionClient;
+    private final RocketRidePipelineService rocketRidePipelineService;
     private final VarifyModelProperties properties;
+    private final RocketRideProperties rocketRideProperties;
 
     public RefereeDecisionService(
             VideoAnalysisService videoAnalysisService,
             GmiDecisionClient gmiDecisionClient,
-            VarifyModelProperties properties
+            RocketRidePipelineService rocketRidePipelineService,
+            VarifyModelProperties properties,
+            RocketRideProperties rocketRideProperties
     ) {
         this.videoAnalysisService = videoAnalysisService;
         this.gmiDecisionClient = gmiDecisionClient;
+        this.rocketRidePipelineService = rocketRidePipelineService;
         this.properties = properties;
+        this.rocketRideProperties = rocketRideProperties;
     }
 
     public RefereeDecisionResponse decide(List<VideoUpload> videos) {
-        requireGmiConfig();
         VideoAnalysisResult analysis = videoAnalysisService.analyze(videos);
+        if (rocketRideProperties.enabled()) {
+            return rocketRidePipelineService.executeRefereeDecisionPipeline(analysis);
+        }
+
+        requireGmiConfig();
         return gmiDecisionClient.decide(analysis, properties.gmi());
     }
 

@@ -14,3 +14,12 @@ varify:
     api-key: ${GMI_API_KEY:}
     base-url: ${GMI_BASE_URL:https://api.gmi-serving.com}
     model: ${GMI_MODEL:}
+  rocketride:
+    enabled: ${ROCKETRIDE_ENABLED:false}
+    api-key: ${ROCKETRIDE_APIKEY:}
+    uri: ${ROCKETRIDE_URI:https://cloud.rocketride.ai}
+    pipeline-path: ${ROCKETRIDE_PIPELINE:classpath:pipelines/referee-decision-advanced.pipe}
+    python-path: ${ROCKETRIDE_PYTHON:python}
+    script-path: ${ROCKETRIDE_SCRIPT:scripts/run_rocketride_pipeline.py}
+    timeout-seconds: ${ROCKETRIDE_TIMEOUT_SECONDS:120}
+    health-ping: ${ROCKETRIDE_HEALTH_PING:false}

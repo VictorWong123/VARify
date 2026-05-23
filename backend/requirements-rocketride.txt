@@ -1,0 +1,2 @@
+# Install with: pip install -r requirements-rocketride.txt
+rocketride>=1.0.0,<2.0.0

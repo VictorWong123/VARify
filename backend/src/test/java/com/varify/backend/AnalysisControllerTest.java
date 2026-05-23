@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.varify.backend.dto.EvidenceMoment;
 import com.varify.backend.dto.RefereeDecisionResponse;
+import com.varify.backend.rocketride.RocketRideHealthService;
 import com.varify.backend.service.RefereeDecisionService;
 import java.util.List;
 import java.util.Map;
@@ -33,12 +34,21 @@ class AnalysisControllerTest {
     @MockBean
     private RefereeDecisionService refereeDecisionService;
 
+    @MockBean
+    private RocketRideHealthService rocketRideHealthService;
+
     @Test
     void healthReturnsOk() throws Exception {
+        when(rocketRideHealthService.check())
+                .thenReturn(RocketRideHealthService.RocketRideHealthStatus.skipped());
+
         mockMvc.perform(get("/api/health"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("ok"))
-                .andExpect(jsonPath("$.service").value("varify-backend"));
+                .andExpect(jsonPath("$.service").value("varify-backend"))
+                .andExpect(jsonPath("$.rocketride.enabled").value(false))
+                .andExpect(jsonPath("$.rocketride.bridge").value("skipped"))
+                .andExpect(jsonPath("$.rocketride.connectivity").value("skipped"));
     }
 
     @Test

@@ -1,7 +1,9 @@
 package com.varify.backend.controller;
 
+import com.varify.backend.dto.HealthResponse;
 import com.varify.backend.dto.RefereeDecisionResponse;
 import com.varify.backend.dto.VideoUpload;
+import com.varify.backend.rocketride.RocketRideHealthService;
 import com.varify.backend.service.RefereeDecisionService;
 import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
@@ -9,7 +11,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -26,14 +27,24 @@ import org.springframework.web.multipart.MultipartFile;
 public class AnalysisController {
 
     private final RefereeDecisionService refereeDecisionService;
+    private final RocketRideHealthService rocketRideHealthService;
 
-    public AnalysisController(RefereeDecisionService refereeDecisionService) {
+    public AnalysisController(
+            RefereeDecisionService refereeDecisionService,
+            RocketRideHealthService rocketRideHealthService
+    ) {
         this.refereeDecisionService = refereeDecisionService;
+        this.rocketRideHealthService = rocketRideHealthService;
     }
 
     @GetMapping("/health")
-    public Map<String, String> health() {
-        return Map.of("status", "ok", "service", "varify-backend");
+    public HealthResponse health() {
+        RocketRideHealthService.RocketRideHealthStatus rocketRideStatus = rocketRideHealthService.check();
+        return new HealthResponse(
+                "ok",
+                "varify-backend",
+                HealthResponse.RocketRideHealth.from(rocketRideStatus)
+        );
     }
 
     @PostMapping(path = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

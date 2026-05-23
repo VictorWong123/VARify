@@ -12,6 +12,7 @@ import com.varify.backend.dto.EvidenceMoment;
 import com.varify.backend.dto.RefereeDecisionResponse;
 import com.varify.backend.dto.VideoAnalysisResult;
 import com.varify.backend.service.GmiDecisionClient;
+import com.varify.backend.service.DecisionResponseParser;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ class GmiDecisionClientTest {
     void sendsGeminiAnalysisToGmiAndParsesDecisionJson() {
         RestClient.Builder builder = RestClient.builder();
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        GmiDecisionClient client = new GmiDecisionClient(builder, new ObjectMapper());
+        GmiDecisionClient client = new GmiDecisionClient(builder, new ObjectMapper(), new DecisionResponseParser());
         server.expect(once(), requestTo("https://api.gmi-serving.com/v1/chat/completions"))
                 .andExpect(header("Authorization", "Bearer gmi-key"))
                 .andRespond(withSuccess("""

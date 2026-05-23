@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.varify.backend.config.VarifyModelProperties;
-import com.varify.backend.dto.EvidenceMoment;
 import com.varify.backend.dto.RefereeDecisionResponse;
 import com.varify.backend.dto.VideoAnalysisResult;
 import com.varify.backend.exception.AnalysisException;
@@ -21,10 +20,16 @@ public class GmiDecisionClient {
 
     private final RestClient restClient;
     private final ObjectMapper objectMapper;
+    private final DecisionResponseParser decisionResponseParser;
 
-    public GmiDecisionClient(RestClient.Builder restClientBuilder, ObjectMapper objectMapper) {
+    public GmiDecisionClient(
+            RestClient.Builder restClientBuilder,
+            ObjectMapper objectMapper,
+            DecisionResponseParser decisionResponseParser
+    ) {
         this.restClient = restClientBuilder.build();
         this.objectMapper = objectMapper;
+        this.decisionResponseParser = decisionResponseParser;
     }
 
     public RefereeDecisionResponse decide(VideoAnalysisResult analysis, VarifyModelProperties.Gmi properties) {
@@ -58,65 +63,23 @@ public class GmiDecisionClient {
             }
 
             JsonNode decision = objectMapper.readTree(content);
-            return responseFrom(decision, analysis, properties);
+            Map<String, Object> decisionTrace = Map.of(
+                    "provider", "gmi",
+                    "mode", "live",
+                    "baseUrl", properties.baseUrl(),
+                    "model", properties.model()
+            );
+            return decisionResponseParser.parse(
+                    decision,
+                    analysis,
+                    "Gemma on GMI Cloud live decision",
+                    decisionTrace
+            );
         } catch (RestClientResponseException exception) {
             throw new AnalysisException("Gemma decision failed: " + responseDetail(exception), exception);
         } catch (JsonProcessingException exception) {
             throw new AnalysisException("Gemma decision failed: response was not valid JSON.", exception);
         }
-    }
-
-    private RefereeDecisionResponse responseFrom(JsonNode decision, VideoAnalysisResult analysis, VarifyModelProperties.Gmi properties) {
-        List<EvidenceMoment> evidence = jsonEvidence(decision.path("evidence"), analysis.evidence());
-        List<EvidenceMoment> keyMoments = jsonEvidence(decision.path("keyMoments"), evidence.isEmpty() ? analysis.evidence() : evidence);
-        List<String> keyTimestamps = keyMoments.stream().map(EvidenceMoment::timestamp).toList();
-        String keyTimestamp = keyTimestamps.isEmpty() ? "" : keyTimestamps.get(0);
-
-        Map<String, Object> modelTrace = new LinkedHashMap<>();
-        modelTrace.put("videoAnalyzer", "Gemini live analysis");
-        modelTrace.put("decisionModel", "Gemma on GMI Cloud live decision");
-        modelTrace.put("trace", Map.of(
-                "videoAnalyzer", analysis.trace(),
-                "decisionModel", Map.of(
-                        "provider", "gmi",
-                        "mode", "live",
-                        "baseUrl", properties.baseUrl(),
-                        "model", properties.model()
-                )
-        ));
-
-        return new RefereeDecisionResponse(
-                requiredText(decision, "decision"),
-                decision.path("confidence").asDouble(0),
-                keyTimestamp,
-                keyTimestamps,
-                keyMoments,
-                requiredText(decision, "ruleCategory"),
-                requiredText(decision, "explanation"),
-                evidence.isEmpty() ? analysis.evidence() : evidence,
-                analysis.summary(),
-                modelTrace
-        );
-    }
-
-    private static List<EvidenceMoment> jsonEvidence(JsonNode items, List<EvidenceMoment> fallback) {
-        if (!items.isArray()) {
-            return fallback;
-        }
-
-        List<EvidenceMoment> evidence = new java.util.ArrayList<>();
-        for (JsonNode item : items) {
-            int videoIndex = item.path("videoIndex").asInt(1);
-            double seconds = item.path("timestampSeconds").asDouble(0);
-            evidence.add(new EvidenceMoment(
-                    formatSeconds(seconds),
-                    item.path("description").asText("Model returned an evidence moment without a description."),
-                    videoIndex,
-                    "Video " + videoIndex,
-                    seconds
-            ));
-        }
-        return evidence;
     }
 
     private static String refereeSystemPrompt() {
@@ -127,25 +90,6 @@ public class GmiDecisionClient {
 
                 Return JSON only with: decision, confidence, ruleCategory, explanation, keyMoments, evidence. keyMoments and evidence items must include videoIndex, timestampSeconds, and description.
                 """;
-    }
-
-    private static String requiredText(JsonNode node, String field) {
-        String value = node.path(field).asText();
-        if (value.isBlank()) {
-            throw new AnalysisException("Gemma decision failed: missing field `" + field + "`.");
-        }
-        return value;
-    }
-
-    private static String formatSeconds(double seconds) {
-        int rounded = Math.max(0, (int) Math.round(seconds));
-        int hours = rounded / 3600;
-        int minutes = (rounded % 3600) / 60;
-        int remainingSeconds = rounded % 60;
-        if (hours > 0) {
-            return String.format("%d:%02d:%02d", hours, minutes, remainingSeconds);
-        }
-        return String.format("%02d:%02d", minutes, remainingSeconds);
     }
 
     private static String trimTrailingSlash(String value) {
