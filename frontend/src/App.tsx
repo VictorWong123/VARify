@@ -24,6 +24,7 @@ import {
   RuleCategoryType,
   VARifyResult,
 } from './types';
+import AIReplay from './AIReplay';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Reference incidents — used both as preset rows and as graceful fallbacks
@@ -1365,6 +1366,10 @@ export default function App() {
   const [activePreset, setActivePreset] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [result, setResult] = useState<VARifyResult | null>(null);
+  const [cinematicStatus, setCinematicStatus] = useState<'idle' | 'loading' | 'done' | 'error'>('idle');
+  const [cinematicUrl, setCinematicUrl] = useState<string | undefined>();
+  const [clipStatus, setClipStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [clipUrl, setClipUrl] = useState<string | undefined>();
   const [error, setError] = useState<string | null>(null);
   const [activeAngleIndex, setActiveAngleIndex] = useState<number | null>(null);
 
@@ -1438,6 +1443,65 @@ export default function App() {
     setResult(null);
   }, []);
 
+  // Build a trimmed video containing only the key moments via /api/clips + RocketRide pipeline.
+  const requestClip = useCallback(async (videoFile: File, analysisResult: VARifyResult) => {
+    const moments = (analysisResult.keyMoments ?? analysisResult.evidence ?? []).filter(
+      (m) => m.timestampSeconds != null,
+    );
+    if (moments.length === 0) return;
+
+    setClipStatus('loading');
+    if (clipUrl) URL.revokeObjectURL(clipUrl);
+    setClipUrl(undefined);
+
+    const segments = moments.map((m) => ({
+      start: Math.max(0, (m.timestampSeconds ?? 0) - 5),
+      end: (m.timestampSeconds ?? 0) + 5,
+    }));
+
+    const form = new FormData();
+    form.append('video', videoFile);
+    form.append('segments', JSON.stringify(segments));
+
+    try {
+      const res = await fetch(apiUrl('/api/clips'), { method: 'POST', body: form });
+      if (!res.ok) throw new Error(`clips ${res.status}`);
+      const blob = await res.blob();
+      setClipUrl(URL.createObjectURL(blob));
+      setClipStatus('ready');
+    } catch {
+      setClipStatus('error');
+    }
+  }, [clipUrl]);
+
+  const handleGenerateCinematic = useCallback(async () => {
+    if (!result) return;
+    setCinematicStatus('loading');
+    try {
+      const moments = (result.keyMoments ?? result.evidence ?? [])
+        .slice(0, 4)
+        .map((m) => `${m.timestamp} ${m.description}`);
+      const response = await fetch(apiUrl('/api/replay/generate'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          decision: result.decision.replace('_', ' '),
+          incident_summary: result.geminiSummary ?? result.explanation,
+          key_moments: moments,
+        }),
+      });
+      if (!response.ok) throw new Error(`${response.status}`);
+      const data = await response.json() as { status: string; request_id?: string; error?: string };
+      if (data.status === 'unavailable' || data.error) {
+        setCinematicStatus('error');
+      } else {
+        setCinematicStatus('done');
+      }
+    } catch {
+      setCinematicStatus('error');
+    }
+  }, [result]);
+
   const triggerAnalysis = useCallback(async () => {
     if (!activePreset && angles.length === 0) {
       setError('Add at least one clip or pick a reference incident.');
@@ -1467,6 +1531,8 @@ export default function App() {
         // Briefly hold the scanning state so the choreography reads.
         await new Promise((r) => setTimeout(r, 1200));
         setResult(data);
+        // Fire-and-forget: trim the video to key moments only via /api/clips + RocketRide
+        requestClip(angles[0].file, data);
       } else if (preset) {
         await new Promise((r) => setTimeout(r, 3400)); // let the scanning state read end-to-end
         setResult(preset.result);
@@ -1669,30 +1735,21 @@ export default function App() {
 
         {/* RESULTS STATE */}
         {result && !isAnalyzing && (
-          <div className="space-y-8">
-            <VerdictBanner result={result} />
-
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-              <div className="lg:col-span-3">
-                <CameraRailResults
-                  cams={cams}
-                  activeIndex={activeAngleIndex}
-                  onSeek={handleSeek}
-                />
-              </div>
-
-              <div className="lg:col-span-9">
-                <AgentPanel
-                  result={result}
-                  camLabels={camLabels}
-                  onActiveAngleChange={setActiveAngleIndex}
-                />
-              </div>
-            </div>
-
-            {cams.some((c) => c.pins.length > 0) && (
-              <EvidenceTimeline cams={cams} onSeek={handleSeek} />
-            )}
+          <div className="space-y-6">
+            <AIReplay
+              videoUrl={angles[0]?.url}
+              clipUrl={clipUrl}
+              clipStatus={clipStatus}
+              decision={result.decision}
+              confidence={result.confidence}
+              finalReason={result.finalReason}
+              keyMoments={result.keyMoments ?? result.evidence ?? []}
+              voiceoverScript={result.voiceoverScript}
+              explanation={result.explanation}
+              onGenerateCinematic={handleGenerateCinematic}
+              cinematicStatus={cinematicStatus}
+              cinematicUrl={cinematicUrl}
+            />
 
             <ModelTrace trace={result.modelTrace} />
 
@@ -1705,6 +1762,13 @@ export default function App() {
                 onClick={() => {
                   setResult(null);
                   setActiveAngleIndex(null);
+                  setCinematicStatus('idle');
+                  setCinematicUrl(undefined);
+                  setClipStatus('idle');
+                  if (clipUrl) {
+                    URL.revokeObjectURL(clipUrl);
+                    setClipUrl(undefined);
+                  }
                 }}
                 className="focus-ring inline-flex items-center gap-2 rounded-lg border border-line bg-elev px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-ink-2 transition-colors hover:border-pacific hover:text-amber-bay"
               >

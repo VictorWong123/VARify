@@ -1,0 +1,14 @@
+{
+  "name": "varify-video-clipper",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "clip": "node video_clipper.mjs",
+    "check": "node check_clipper.mjs"
+  },
+  "dependencies": {
+    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "fluent-ffmpeg": "^2.1.3",
+    "rocketride": "latest"
+  }
+}

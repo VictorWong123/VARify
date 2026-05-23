@@ -13,6 +13,8 @@ public record RefereeDecisionResponse(
         String explanation,
         List<EvidenceMoment> evidence,
         String geminiSummary,
-        Map<String, Object> modelTrace
+        Map<String, Object> modelTrace,
+        String voiceoverScript,
+        String finalReason
 ) {
 }

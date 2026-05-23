@@ -67,8 +67,9 @@ public class GmiDecisionClient {
     }
 
     private RefereeDecisionResponse responseFrom(JsonNode decision, VideoAnalysisResult analysis, VarifyModelProperties.Gmi properties) {
-        List<EvidenceMoment> evidence = jsonEvidence(decision.path("evidence"), analysis.evidence());
-        List<EvidenceMoment> keyMoments = jsonEvidence(decision.path("keyMoments"), evidence.isEmpty() ? analysis.evidence() : evidence);
+        // Preserve Gemini's key moments (with highlight data) as the primary replay source
+        List<EvidenceMoment> keyMoments = analysis.evidence();
+        List<EvidenceMoment> evidence = jsonEvidence(decision.path("evidence"), keyMoments);
         List<String> keyTimestamps = keyMoments.stream().map(EvidenceMoment::timestamp).toList();
         String keyTimestamp = keyTimestamps.isEmpty() ? "" : keyTimestamps.get(0);
 
@@ -85,6 +86,9 @@ public class GmiDecisionClient {
                 )
         ));
 
+        String voiceoverScript = decision.path("voiceover_script").asText(null);
+        String finalReason = decision.path("final_reason").asText(null);
+
         return new RefereeDecisionResponse(
                 requiredText(decision, "decision"),
                 decision.path("confidence").asDouble(0),
@@ -93,9 +97,11 @@ public class GmiDecisionClient {
                 keyMoments,
                 requiredText(decision, "ruleCategory"),
                 requiredText(decision, "explanation"),
-                evidence.isEmpty() ? analysis.evidence() : evidence,
+                evidence.isEmpty() ? keyMoments : evidence,
                 analysis.summary(),
-                modelTrace
+                modelTrace,
+                voiceoverScript,
+                finalReason
         );
     }
 
@@ -113,7 +119,11 @@ public class GmiDecisionClient {
                     item.path("description").asText("Model returned an evidence moment without a description."),
                     videoIndex,
                     "Video " + videoIndex,
-                    seconds
+                    seconds,
+                    null,
+                    null,
+                    null,
+                    null
             ));
         }
         return evidence;
@@ -125,7 +135,15 @@ public class GmiDecisionClient {
 
                 Apply Law 12 concepts: careless, reckless, excessive force, serious foul play, violent conduct, point of contact, speed, control, chance to play the ball, and player safety. Use only the provided Gemini structured observations. Do not invent timestamps.
 
-                Return JSON only with: decision, confidence, ruleCategory, explanation, keyMoments, evidence. keyMoments and evidence items must include videoIndex, timestampSeconds, and description.
+                Return JSON only with these fields:
+                - decision: "RED_CARD", "YELLOW_CARD", or "NO_CARD"
+                - confidence: number 0-1
+                - ruleCategory: "careless", "reckless", "excessive force", or "no offense"
+                - explanation: multi-sentence broadcast-style referee brief
+                - final_reason: one crisp sentence summarizing the referee ruling (e.g., "The challenge is reckless because the defender arrives late and makes contact with the opponent's leg rather than the ball.")
+                - voiceover_script: 2-3 sentence broadcast voiceover explaining the VAR decision. Reference key timestamps. Example: "At four seconds, the defender begins a late challenge. At six seconds, contact is made with the opponent's leg. VARify recommends a yellow card."
+                - keyMoments: array of {videoIndex, timestampSeconds, description}
+                - evidence: array of {videoIndex, timestampSeconds, description}
                 """;
     }
 

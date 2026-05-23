@@ -143,7 +143,13 @@ public class GeminiVideoClient {
         Map<String, Object> promptPart = Map.of("text", """
                 Analyze the uploaded soccer incident videos. Each uploaded file is a different angle of the same incident and must be referenced by its 1-based videoIndex in upload order.
 
-                Return only JSON matching the schema. Identify the actual foul/contact incident timestamps. Do not guess 00:07 unless the incident truly happens there. If multiple angles show the same incident, include key moments for each relevant angle.
+                Return only JSON matching the schema. Identify the actual foul/contact incident timestamps. Do not guess timestamps unless the incident truly happens there. If multiple angles show the same incident, include key moments for each relevant angle.
+
+                For each key moment provide:
+                - title: short broadcast-style label (e.g., "Late challenge begins")
+                - caption: one sentence describing what happened at that moment
+                - endSeconds: approximately timestamp_seconds + 1.0 (when this moment ends)
+                - highlight: estimate the region of contact as percentages (0-100) of the video frame. Use "circle" for player contact, "box" for tackle/area. If uncertain, place near center-bottom at x:50, y:65, width:20, height:20.
                 """);
 
         java.util.ArrayList<Object> parts = new java.util.ArrayList<>(fileParts);
@@ -152,15 +158,30 @@ public class GeminiVideoClient {
     }
 
     private static Map<String, Object> responseSchema() {
+        Map<String, Object> highlight = new LinkedHashMap<>();
+        highlight.put("type", "OBJECT");
+        highlight.put("properties", new LinkedHashMap<>(Map.of(
+                "type", Map.of("type", "STRING"),
+                "x", Map.of("type", "NUMBER"),
+                "y", Map.of("type", "NUMBER"),
+                "width", Map.of("type", "NUMBER"),
+                "height", Map.of("type", "NUMBER")
+        )));
+
+        Map<String, Object> keyMomentProps = new LinkedHashMap<>();
+        keyMomentProps.put("videoIndex", Map.of("type", "INTEGER"));
+        keyMomentProps.put("timestampSeconds", Map.of("type", "NUMBER"));
+        keyMomentProps.put("endSeconds", Map.of("type", "NUMBER"));
+        keyMomentProps.put("title", Map.of("type", "STRING"));
+        keyMomentProps.put("description", Map.of("type", "STRING"));
+        keyMomentProps.put("caption", Map.of("type", "STRING"));
+        keyMomentProps.put("confidence", Map.of("type", "NUMBER"));
+        keyMomentProps.put("highlight", highlight);
+
         Map<String, Object> keyMoment = new LinkedHashMap<>();
         keyMoment.put("type", "OBJECT");
-        keyMoment.put("required", List.of("videoIndex", "timestampSeconds", "description", "confidence"));
-        keyMoment.put("properties", Map.of(
-                "videoIndex", Map.of("type", "INTEGER"),
-                "timestampSeconds", Map.of("type", "NUMBER"),
-                "description", Map.of("type", "STRING"),
-                "confidence", Map.of("type", "NUMBER")
-        ));
+        keyMoment.put("required", List.of("videoIndex", "timestampSeconds", "endSeconds", "title", "description", "caption", "confidence"));
+        keyMoment.put("properties", keyMomentProps);
 
         Map<String, Object> schema = new LinkedHashMap<>();
         schema.put("type", "OBJECT");

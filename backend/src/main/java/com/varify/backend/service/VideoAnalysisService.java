@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.varify.backend.config.VarifyModelProperties;
 import com.varify.backend.dto.EvidenceMoment;
+import com.varify.backend.dto.Highlight;
 import com.varify.backend.dto.VideoUpload;
 import com.varify.backend.dto.VideoAnalysisResult;
 import com.varify.backend.exception.AnalysisException;
@@ -76,14 +77,34 @@ public class VideoAnalysisService {
             int videoIndex = moment.path("videoIndex").asInt(1);
             VideoUpload video = videoFor(videoIndex, videos);
             double timestampSeconds = moment.path("timestampSeconds").asDouble(0);
-            evidence.add(EvidenceMoment.forVideo(
+            double endSeconds = moment.path("endSeconds").asDouble(timestampSeconds + 1.0);
+            String title = moment.path("title").isMissingNode() ? null : moment.path("title").asText(null);
+            String caption = moment.path("caption").isMissingNode() ? null : moment.path("caption").asText(null);
+            Highlight highlight = highlightFrom(moment.path("highlight"));
+            evidence.add(new EvidenceMoment(
                     formatSeconds(timestampSeconds),
                     moment.path("description").asText("Gemini returned a key moment without a description."),
-                    video,
-                    timestampSeconds
+                    video.videoIndex(),
+                    video.label(),
+                    timestampSeconds,
+                    endSeconds,
+                    title,
+                    caption,
+                    highlight
             ));
         }
         return evidence;
+    }
+
+    private static Highlight highlightFrom(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) return null;
+        return new Highlight(
+                node.path("type").asText("circle"),
+                node.path("x").asDouble(50),
+                node.path("y").asDouble(65),
+                node.path("width").asDouble(20),
+                node.path("height").asDouble(20)
+        );
     }
 
     private static Map<String, Object> traceFor(JsonNode structured, List<VideoUpload> videos) {
