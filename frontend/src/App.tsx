@@ -92,6 +92,74 @@ interface FoulMarker {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Backend response normalizer
+
+   The backend (Spring controller `AnalysisController`) returns
+   `RefereeDecisionResponse` whose field names and value shapes don't match
+   this UI's `AnalyzeResult`. Adapt here rather than reshape the API.
+   ───────────────────────────────────────────────────────────────────────── */
+
+function mapDecision(value: unknown): Decision {
+  if (typeof value !== 'string') return 'No Card';
+  const u = value.replace(/[\s_]+/g, '').toUpperCase();
+  if (u.startsWith('RED')) return 'Red Card';
+  if (u.startsWith('YELLOW')) return 'Yellow Card';
+  if (u.startsWith('NO') || u === 'NONE') return 'No Card';
+  return 'No Card';
+}
+
+function toTitleCase(value: string): string {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function parseKeyTimestamp(raw: unknown, fallback: unknown): AnalyzeResult['timestamps'] {
+  if (typeof raw === 'string' && raw.trim()) {
+    const trimmed = raw.trim();
+    if (trimmed.includes('-')) {
+      const [startRaw, endRaw] = trimmed.split('-').map((s) => s.trim());
+      const start = startRaw || '00:00';
+      const end = endRaw || start;
+      return { start, end, label: 'Incident start to contact' };
+    }
+    return { start: trimmed, end: trimmed, label: 'Key moment' };
+  }
+  if (Array.isArray(fallback) && fallback.length > 0) {
+    const start = String(fallback[0]);
+    const end = String(fallback[fallback.length - 1] ?? start);
+    return {
+      start,
+      end,
+      label: fallback.length > 1 ? 'Incident start to contact' : 'Key moment',
+    };
+  }
+  return { start: '00:00', end: '00:00', label: '' };
+}
+
+function normalizeBackendResponse(raw: any): AnalyzeResult {
+  const explanation =
+    typeof raw?.explanation === 'string' && raw.explanation.trim()
+      ? raw.explanation
+      : typeof raw?.geminiSummary === 'string'
+        ? raw.geminiSummary
+        : '';
+  const subtitle =
+    typeof raw?.ruleCategory === 'string' && raw.ruleCategory.trim()
+      ? toTitleCase(raw.ruleCategory.trim())
+      : '';
+  return {
+    decision: mapDecision(raw?.decision),
+    decisionSubtitle: subtitle,
+    reasoning: explanation,
+    timestamps: parseKeyTimestamp(raw?.keyTimestamp, raw?.keyTimestamps),
+    confidence: typeof raw?.confidence === 'number' ? raw.confidence : 0,
+  };
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    Backdrop — abstract tournament ribbons + stadium glows + grain
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -711,40 +779,63 @@ export default function App() {
       return;
     }
 
+    if (!file && youtubeUrl.trim()) {
+      // Backend currently only accepts multipart video uploads.
+      setError('YouTube link analysis isn\'t supported by the backend yet. Upload a local video file to run analysis.');
+      setState('error');
+      return;
+    }
+
     setState('analyzing');
     setError(null);
     setResult(null);
 
     try {
-      let response: Response;
-      if (file) {
-        const form = new FormData();
-        form.append('videoFile', file);
-        response = await fetch(apiUrl('/api/analyze'), { method: 'POST', body: form });
-      } else {
-        response = await fetch(apiUrl('/api/analyze'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ youtubeUrl: youtubeUrl.trim() }),
-        });
-      }
+      const form = new FormData();
+      form.append('video', file!);
+      const response = await fetch(apiUrl('/api/analyze'), { method: 'POST', body: form });
 
       if (!response.ok) {
-        throw new Error(`Backend responded ${response.status}`);
+        let detail = `Backend responded ${response.status}`;
+        try {
+          const ct = response.headers.get('content-type') ?? '';
+          if (ct.includes('application/json')) {
+            const j: any = await response.json();
+            if (typeof j?.message === 'string' && j.message.trim()) detail = j.message;
+            else detail = JSON.stringify(j);
+          } else {
+            const txt = await response.text();
+            if (txt.trim()) detail = txt;
+          }
+        } catch {
+          /* keep the status-line fallback */
+        }
+        throw new Error(detail);
       }
-      const data = (await response.json()) as AnalyzeResult;
-      // Brief hold so the analyzing state is perceivable on fast networks.
-      await new Promise((r) => setTimeout(r, 600));
-      setResult(data);
+
+      const raw = await response.json();
+      setResult(normalizeBackendResponse(raw));
       setState('ready');
     } catch (e) {
-      // Backend not wired up yet (or unreachable) — fall back to demo data
-      // so the UI flow can still be reviewed.
-      await new Promise((r) => setTimeout(r, 900));
-      setResult(MOCK_RESULT);
-      setState('ready');
       const message = e instanceof Error ? e.message : String(e);
-      console.warn('[VARify] /api/analyze unavailable — showing demo result.', message);
+      // `fetch` throws TypeError only when the request itself never made it
+      // (DNS, connection refused, CORS preflight blocked, etc.). A 4xx/5xx
+      // from the backend is a successful round-trip and goes through the
+      // throw above — those carry real diagnostic text and must be shown.
+      const isNetworkFailure =
+        e instanceof TypeError && /failed to fetch|network|load failed/i.test(message);
+
+      if (isNetworkFailure) {
+        await new Promise((r) => setTimeout(r, 600));
+        setError(
+          'Backend not reachable on /api/analyze. Showing a demo response so the UI flow can be reviewed — start the backend on port 8080 for real analysis.',
+        );
+        setResult(MOCK_RESULT);
+        setState('ready');
+      } else {
+        setError(message);
+        setState('error');
+      }
     }
   }, [file, youtubeUrl]);
 
