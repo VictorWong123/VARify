@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: varify-backend
+  servlet:
+    multipart:
+      max-file-size: 100MB
+      max-request-size: 100MB
+
+varify:
+  gemini:
+    api-key: ${GEMINI_API_KEY:}
+  gmi:
+    api-key: ${GMI_API_KEY:}
+    base-url: ${GMI_BASE_URL:https://api.gmi-serving.com}
+    model: ${GMI_MODEL:gmi-default-referee-model}
+  rocketride:
+    api-key: ${ROCKETRIDE_API_KEY:}

@@ -1,0 +1,22 @@
+# Local secrets and machine-specific environment files
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# Dependencies
+node_modules/
+
+# Build and test output
+dist/
+target/
+*.tsbuildinfo
+
+# Local tool artifacts
+.rocketride/
+.playwright-mcp/
+
+# OS/editor noise
+.DS_Store
