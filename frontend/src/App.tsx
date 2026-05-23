@@ -1,11 +1,14 @@
-import { ChangeEvent, FormEvent, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type Decision = "RED_CARD" | "YELLOW_CARD" | "NO_CARD" | string;
 
 type EvidenceMoment = {
   timestamp?: string;
+  timestampSeconds?: number;
   description?: string;
   observation?: string;
+  videoIndex?: number;
+  videoLabel?: string;
 };
 
 type AnalysisResult = {
@@ -13,6 +16,7 @@ type AnalysisResult = {
   confidence?: number;
   keyTimestamp?: string;
   keyTimestamps?: string[];
+  keyMoments?: EvidenceMoment[];
   explanation?: string;
   evidence?: EvidenceMoment[];
   ruleCategory?: string;
@@ -22,6 +26,8 @@ type AnalysisResult = {
 };
 
 const acceptedTypes = [".mp4", ".mov", ".webm"];
+const timestampPattern = /(?:(\d{1,2}):)?(\d{1,2}):(\d{2})/;
+const videoLabelPattern = /\b(?:video|angle)\s+(\d+)\b/i;
 
 function apiUrl(path: string) {
   const baseUrl = import.meta.env.VITE_API_BASE_URL?.trim();
@@ -74,40 +80,98 @@ function formatTrace(modelTrace?: AnalysisResult["modelTrace"]) {
   return typeof modelTrace === "string" ? modelTrace : JSON.stringify(modelTrace, null, 2);
 }
 
+function parseTimestampStart(timestamp?: string) {
+  const match = timestamp?.match(timestampPattern);
+  if (!match) {
+    return null;
+  }
+
+  const hours = match[1] ? Number(match[1]) : 0;
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3]);
+
+  if ([hours, minutes, seconds].some(Number.isNaN)) {
+    return null;
+  }
+
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function timestampSecondsFor(moment: EvidenceMoment | undefined) {
+  if (typeof moment?.timestampSeconds === "number" && !Number.isNaN(moment.timestampSeconds)) {
+    return moment.timestampSeconds;
+  }
+
+  return parseTimestampStart(moment?.timestamp);
+}
+
+function videoIndexFromTimestamp(timestamp?: string) {
+  const match = timestamp?.match(videoLabelPattern);
+  if (!match) {
+    return undefined;
+  }
+
+  const parsed = Number(match[1]);
+  return Number.isNaN(parsed) ? undefined : parsed;
+}
+
+function displayVideoLabel(videoIndex: number | undefined, files: File[]) {
+  if (!videoIndex) {
+    return "";
+  }
+
+  const file = files[videoIndex - 1];
+  return file ? `Video ${videoIndex}: ${file.name}` : `Video ${videoIndex}`;
+}
+
 export default function App() {
-  const [file, setFile] = useState<File | null>(null);
+  const [files, setFiles] = useState<File[]>([]);
+  const [selectedVideoIndex, setSelectedVideoIndex] = useState(0);
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const videoRefs = useRef<Array<HTMLVideoElement | null>>([]);
 
-  const previewUrl = useMemo(() => {
-    if (!file) {
-      return null;
-    }
-
-    return URL.createObjectURL(file);
-  }, [file]);
+  const previewUrls = useMemo(() => files.map((nextFile) => URL.createObjectURL(nextFile)), [files]);
 
   useEffect(() => {
     return () => {
-      if (previewUrl && typeof URL.revokeObjectURL === "function") {
-        URL.revokeObjectURL(previewUrl);
+      if (typeof URL.revokeObjectURL === "function") {
+        previewUrls.forEach((previewUrl) => URL.revokeObjectURL(previewUrl));
       }
     };
-  }, [previewUrl]);
+  }, [previewUrls]);
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
-    const nextFile = event.target.files?.[0] ?? null;
-    setFile(nextFile);
+    const nextFiles = Array.from(event.target.files ?? []);
+    setFiles(nextFiles);
+    setSelectedVideoIndex(0);
     setResult(null);
     setError(null);
+  }
+
+  function seekToTimestamp(moment: EvidenceMoment) {
+    const nextVideoIndex = moment.videoIndex ?? videoIndexFromTimestamp(moment.timestamp) ?? 1;
+    const nextVideoArrayIndex = Math.max(0, Math.min(files.length - 1, nextVideoIndex - 1));
+    const nextTime = timestampSecondsFor(moment);
+    const video = videoRefs.current[nextVideoArrayIndex];
+
+    setSelectedVideoIndex(nextVideoArrayIndex);
+
+    if (!video || nextTime === null) {
+      return;
+    }
+
+    video.currentTime = nextTime;
+    video.pause();
+    video.scrollIntoView({ behavior: "smooth", block: "center" });
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!file) {
-      setError("Choose a soccer clip before requesting analysis.");
+    if (!files.length) {
+      setError("Choose at least one soccer clip before requesting analysis.");
       return;
     }
 
@@ -116,16 +180,20 @@ export default function App() {
     setResult(null);
 
     const formData = new FormData();
-    formData.append("video", file);
+    files.forEach((nextFile) => {
+      formData.append("video", nextFile);
+    });
 
     try {
       const response = await fetch(apiUrl("/api/analyze"), {
         method: "POST",
+        credentials: "omit",
         body: formData
       });
 
       if (!response.ok) {
-        throw new Error(`Analysis failed with status ${response.status}`);
+        const errorMessage = await errorMessageFor(response);
+        throw new Error(errorMessage || `Analysis failed with status ${response.status}`);
       }
 
       const analysis = (await response.json()) as AnalysisResult;
@@ -134,7 +202,7 @@ export default function App() {
       setError(
         caughtError instanceof Error
           ? caughtError.message
-          : "Analysis failed. Check that the backend is running. API keys are not required for mock mode."
+          : "Analysis failed. Check that the backend is running and model credentials are configured."
       );
     } finally {
       setIsAnalyzing(false);
@@ -161,45 +229,95 @@ export default function App() {
             <input
               aria-label="Upload soccer clip"
               type="file"
+              multiple
               accept={acceptedTypes.join(",")}
               onChange={handleFileChange}
             />
-            <span className="upload-title">Upload match clip</span>
-            <span className="upload-meta">MP4, MOV, or WEBM</span>
+            <span className="upload-title">Upload match clips</span>
+            <span className="upload-meta">MP4, MOV, or WEBM. Select one or more angles.</span>
           </label>
 
-          {file ? (
-            <div className="file-row">
-              <span>{file.name}</span>
-              <strong>{(file.size / 1024 / 1024).toFixed(1)} MB</strong>
+          {files.length ? (
+            <div className="file-list" aria-label="Selected clips">
+              {files.map((nextFile, index) => (
+                <button
+                  className={selectedVideoIndex === index ? "file-row active" : "file-row"}
+                  key={`${nextFile.name}-${nextFile.lastModified}-${index}`}
+                  onClick={() => setSelectedVideoIndex(index)}
+                  type="button"
+                >
+                  <span>Video {index + 1}: {nextFile.name}</span>
+                  <strong>{(nextFile.size / 1024 / 1024).toFixed(1)} MB</strong>
+                </button>
+              ))}
             </div>
           ) : null}
 
-          {previewUrl ? (
-            <video className="video-preview" src={previewUrl} controls />
+          {previewUrls.length ? (
+            <div className="video-grid">
+              {previewUrls.map((previewUrl, index) => (
+                <figure
+                  className={selectedVideoIndex === index ? "video-card active" : "video-card"}
+                  key={`${files[index].name}-${files[index].lastModified}-${index}`}
+                >
+                  <figcaption>Video {index + 1}</figcaption>
+                  <video
+                    className="video-preview"
+                    ref={(element) => {
+                      videoRefs.current[index] = element;
+                    }}
+                    src={previewUrl}
+                    controls
+                  />
+                </figure>
+              ))}
+            </div>
           ) : (
             <div className="empty-preview">Clip preview appears here</div>
           )}
 
           <button className="analyze-button" type="submit" disabled={isAnalyzing}>
-            {isAnalyzing ? "Analyzing Clip..." : "Analyze Clip"}
+            {isAnalyzing ? "Analyzing Clips..." : "Analyze Clips"}
           </button>
 
           {error ? <p className="error-message">{error}</p> : null}
         </form>
 
-        <ResultsDashboard result={result} isAnalyzing={isAnalyzing} />
+        <ResultsDashboard
+          files={files}
+          result={result}
+          isAnalyzing={isAnalyzing}
+          onTimestampClick={seekToTimestamp}
+        />
       </section>
     </main>
   );
 }
 
+async function errorMessageFor(response: Response) {
+  const text = await response.text();
+  if (!text) {
+    return "";
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { message?: string };
+    return parsed.message ?? text;
+  } catch {
+    return text;
+  }
+}
+
 function ResultsDashboard({
+  files,
   result,
-  isAnalyzing
+  isAnalyzing,
+  onTimestampClick
 }: {
+  files: File[];
   result: AnalysisResult | null;
   isAnalyzing: boolean;
+  onTimestampClick: (moment: EvidenceMoment) => void;
 }) {
   if (isAnalyzing) {
     return (
@@ -215,16 +333,21 @@ function ResultsDashboard({
     return (
       <section className="results-panel waiting">
         <h2>Decision dashboard</h2>
-        <p>Upload a clip to see card recommendation, timestamps, and evidence.</p>
+        <p>Upload clips to see card recommendation, timestamps, and evidence.</p>
       </section>
     );
   }
 
-  const timestamps = result.keyTimestamps?.length
-    ? result.keyTimestamps
-    : result.keyTimestamp
-      ? [result.keyTimestamp]
-      : ["No timestamps returned"];
+  const keyMoments: EvidenceMoment[] = result.keyMoments?.length
+    ? result.keyMoments
+    : result.keyTimestamps?.length
+      ? result.keyTimestamps.map((timestamp): EvidenceMoment => ({
+          timestamp,
+          videoIndex: videoIndexFromTimestamp(timestamp)
+        }))
+      : result.keyTimestamp
+        ? [{ timestamp: result.keyTimestamp, videoIndex: videoIndexFromTimestamp(result.keyTimestamp) }]
+        : [];
   const evidence = result.evidence?.length ? result.evidence : [];
   const ruleInterpretation = result.ruleInterpretation ?? result.ruleCategory;
   const trace = formatTrace(result.modelTrace);
@@ -247,9 +370,21 @@ function ResultsDashboard({
       <div className="result-block">
         <h2>Key timestamps</h2>
         <div className="timestamp-list">
-          {timestamps.map((timestamp) => (
-            <span key={timestamp}>{timestamp}</span>
-          ))}
+          {keyMoments.length ? (
+            keyMoments.map((moment, index) => (
+              <button
+                key={`${moment.videoIndex ?? "video"}-${moment.timestamp ?? index}`}
+                onClick={() => onTimestampClick(moment)}
+                type="button"
+              >
+                {moment.videoLabel ?? displayVideoLabel(moment.videoIndex, files)}
+                {moment.videoLabel || moment.videoIndex ? " - " : ""}
+                {moment.timestamp ?? "Timestamp unavailable"}
+              </button>
+            ))
+          ) : (
+            <span>No timestamps returned</span>
+          )}
         </div>
       </div>
 
@@ -264,7 +399,17 @@ function ResultsDashboard({
           {evidence.length ? (
             evidence.map((item, index) => (
               <li key={`${item.timestamp ?? "moment"}-${index}`}>
-                {item.timestamp ? <strong>{item.timestamp}: </strong> : null}
+                {item.timestamp ? (
+                  <button
+                    className="evidence-timestamp"
+                    onClick={() => onTimestampClick(item)}
+                    type="button"
+                  >
+                    {item.videoLabel ?? displayVideoLabel(item.videoIndex, files)}
+                    {item.videoLabel || item.videoIndex ? " - " : ""}
+                    {item.timestamp}
+                  </button>
+                ) : null}
                 {item.description ?? item.observation ?? "Evidence moment returned without a description."}
               </li>
             ))

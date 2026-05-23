@@ -9,9 +9,8 @@ spring:
 varify:
   gemini:
     api-key: ${GEMINI_API_KEY:}
+    model: ${GEMINI_MODEL:gemini-2.5-flash}
   gmi:
     api-key: ${GMI_API_KEY:}
     base-url: ${GMI_BASE_URL:https://api.gmi-serving.com}
-    model: ${GMI_MODEL:gmi-default-referee-model}
-  rocketride:
-    api-key: ${ROCKETRIDE_API_KEY:}
+    model: ${GMI_MODEL:}

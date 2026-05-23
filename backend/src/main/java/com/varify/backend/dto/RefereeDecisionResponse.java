@@ -7,6 +7,8 @@ public record RefereeDecisionResponse(
         String decision,
         double confidence,
         String keyTimestamp,
+        List<String> keyTimestamps,
+        List<EvidenceMoment> keyMoments,
         String ruleCategory,
         String explanation,
         List<EvidenceMoment> evidence,
