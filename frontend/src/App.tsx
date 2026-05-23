@@ -24,6 +24,10 @@ const MOCK_RESULT: AnalyzeResult = {
 const MAX_ANGLES = 3;
 const ACCEPTED_VIDEO = 'video/mp4,video/quicktime,video/x-msvideo,video/webm,.mp4,.mov,.avi,.webm';
 
+// Pull the foul marker back from the actual contact moment so playback
+// lands with a brief lead-in instead of starting right on top of the action.
+const FOUL_LEAD_IN_SECONDS = 0.5;
+
 /* ─────────────────────────────────────────────────────────────────────────
    Helpers
    ───────────────────────────────────────────────────────────────────────── */
@@ -961,13 +965,19 @@ export default function App() {
                   onSelectAngle={setReviewActiveIndex}
                   decisionLabel={`${result.decision} · ${result.decisionSubtitle}`}
                   remoteUrl={result.aiReviewVideoUrl}
-                  marker={{
-                    startTime: parseTimestamp(result.timestamps.start),
-                    endTime: parseTimestamp(result.timestamps.end),
-                    label: result.timestamps.label,
-                    displayStart: result.timestamps.start,
-                    variant: decisionVariant(result.decision),
-                  }}
+                  marker={(() => {
+                    const rawStart = parseTimestamp(result.timestamps.start);
+                    const rawEnd = parseTimestamp(result.timestamps.end);
+                    const startTime = Math.max(0, rawStart - FOUL_LEAD_IN_SECONDS);
+                    const endTime = Math.max(startTime, rawEnd - FOUL_LEAD_IN_SECONDS);
+                    return {
+                      startTime,
+                      endTime,
+                      label: result.timestamps.label,
+                      displayStart: result.timestamps.start,
+                      variant: decisionVariant(result.decision),
+                    };
+                  })()}
                 />
                 <div className="varify-results-grid">
                   <OriginalClipCard
