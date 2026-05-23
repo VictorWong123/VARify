@@ -1,0 +1,81 @@
+{
+	"components": [
+		{
+			"id": "input",
+			"provider": "webhook",
+			"config": {}
+		},
+		{
+			"id": "video_context_extractor",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 4000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.3,
+				"system_prompt": "Analyze the video metadata and extract: 1) Players involved, 2) Type of play (tackle, header, contact, etc), 3) Location on field, 4) Game context (if available)"
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "input"
+				}
+			]
+		},
+		{
+			"id": "rule_checker",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 6000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.4,
+				"system_prompt": "Review the play context and identify which FIFA Laws of the Game might apply. Check for: Fouls, Violent Conduct, Excessive Force, Dangerous Play, Handling, Offside, or other infractions."
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "video_context_extractor"
+				}
+			]
+		},
+		{
+			"id": "final_decision",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 8000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.6,
+				"system_prompt": "Based on the rules analysis, make a final referee decision. Output JSON with: {decision: RED_CARD|YELLOW_CARD|NO_CARD, confidence: 0-100, rule_applied: string, explanation: string, timestamp: string}"
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "rule_checker"
+				}
+			]
+		},
+		{
+			"id": "output",
+			"provider": "response_text",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "final_decision"
+				}
+			]
+		}
+	],
+	"project_id": "d4e5f6a7-b8c9-4ada-e2f3-a4b5c6d7e8f9",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}

@@ -1,0 +1,44 @@
+{
+	"components": [
+		{
+			"id": "input",
+			"provider": "webhook",
+			"config": {}
+		},
+		{
+			"id": "referee_analyzer",
+			"provider": "llm",
+			"config": {
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"provider": "gmi-h100",
+				"temperature": 0.7,
+				"max_tokens": 2000,
+				"system_prompt": "You are an expert football/soccer referee. Analyze the provided evidence and make a fair decision on the contested play."
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "input"
+				}
+			]
+		},
+		{
+			"id": "output",
+			"provider": "response_text",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "referee_analyzer"
+				}
+			]
+		}
+	],
+	"project_id": "a1b2c3d4-e5f6-47a8-b9c0-d1e2f3a4b5c6",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}

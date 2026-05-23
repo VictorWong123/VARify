@@ -1,0 +1,63 @@
+{
+	"components": [
+		{
+			"id": "input",
+			"provider": "webhook",
+			"config": {}
+		},
+		{
+			"id": "evidence_extractor",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 8000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.3,
+				"system_prompt": "Extract and summarize key evidence moments from the provided video analysis. Focus on timestamps, player actions, and potential infractions."
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "input"
+				}
+			]
+		},
+		{
+			"id": "referee_decision",
+			"provider": "llm_gmi_cloud",
+			"config": {
+				"serverbase": "${GMI_BASE_URL:https://api.gmi-serving.com}",
+				"model": "${GMI_MODEL:meta-llama/Llama-3.1-70B-Instruct}",
+				"modelTotalTokens": 8000,
+				"apikey": "${GMI_API_KEY}",
+				"temperature": 0.5,
+				"system_prompt": "You are an expert football/soccer referee. Based on the extracted evidence, make a decision on whether this is a RED_CARD, YELLOW_CARD, or NO_CARD offense. Provide your reasoning, the relevant rule applied, and confidence level (0-100)."
+			},
+			"input": [
+				{
+					"lane": "text",
+					"from": "evidence_extractor"
+				}
+			]
+		},
+		{
+			"id": "output",
+			"provider": "response_text",
+			"config": {},
+			"input": [
+				{
+					"lane": "text",
+					"from": "referee_decision"
+				}
+			]
+		}
+	],
+	"project_id": "c3d4e5f6-a7b8-49ca-d1e2-f3a4b5c6d7e8",
+	"viewport": {
+		"x": 0,
+		"y": 0,
+		"zoom": 1
+	},
+	"version": 1
+}
