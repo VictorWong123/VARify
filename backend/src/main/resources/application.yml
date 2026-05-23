@@ -14,3 +14,5 @@ varify:
     api-key: ${GMI_API_KEY:}
     base-url: ${GMI_BASE_URL:https://api.gmi-serving.com}
     model: ${GMI_MODEL:}
+  tts:
+    api-key: ${GOOGLE_TTS_API_KEY:}

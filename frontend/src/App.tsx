@@ -660,6 +660,76 @@ function ReviewSummaryCard({ result }: { result: AnalyzeResult }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   5) EvidenceVideoCard
+   ───────────────────────────────────────────────────────────────────────── */
+
+function EvidenceVideoCard({
+  src,
+  isLoading,
+  error,
+  onGenerate,
+  decision,
+}: {
+  src: string | null;
+  isLoading: boolean;
+  error: string | null;
+  onGenerate: () => void;
+  decision: Decision;
+}) {
+  const variant = decisionVariant(decision);
+  return (
+    <section className={`varify-card varify-card--accent varify-evidence-card varify-reveal`}>
+      <h2 className="varify-card-title">Evidence Video</h2>
+
+      {src ? (
+        <div className="varify-evidence-content">
+          <SimpleVideoPlayer
+            src={src}
+            fallbackLabel="Evidence reel"
+            fallbackHint="AI-generated highlight with voiceover"
+          />
+          <div className="varify-evidence-actions">
+            <a
+              href={src}
+              download="varify-evidence.mp4"
+              className="varify-evidence-download"
+            >
+              Download Evidence Video
+            </a>
+            <button
+              type="button"
+              className="varify-evidence-regen"
+              onClick={onGenerate}
+              disabled={isLoading}
+            >
+              Regenerate
+            </button>
+          </div>
+        </div>
+      ) : isLoading ? (
+        <div className="varify-evidence-loading">
+          <div className={`varify-evidence-spinner varify-evidence-spinner--${variant}`} />
+          <span>Generating evidence reel&hellip;</span>
+          <small>Extracting clips, writing narration, synthesizing voiceover</small>
+        </div>
+      ) : (
+        <div className="varify-evidence-prompt">
+          <p>Generate an AI-narrated evidence video supporting this decision.</p>
+          <button
+            type="button"
+            className={`varify-analyze-btn varify-evidence-generate-btn varify-evidence-generate-btn--${variant}`}
+            onClick={onGenerate}
+          >
+            Generate Evidence Video
+          </button>
+          {error && <div className="varify-error">{error}</div>}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    App
    ───────────────────────────────────────────────────────────────────────── */
 
@@ -670,6 +740,10 @@ export default function App() {
   const [state, setState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [evidenceVideoUrl, setEvidenceVideoUrl] = useState<string | null>(null);
+  const [evidenceLoading, setEvidenceLoading] = useState(false);
+  const [evidenceError, setEvidenceError] = useState<string | null>(null);
+  const rawAnalysisRef = useRef<Record<string, unknown> | null>(null);
 
   // Manage object URL lifecycle for the uploaded file
   useEffect(() => {
@@ -684,13 +758,22 @@ export default function App() {
 
   const ytId = useMemo(() => youTubeId(youtubeUrl.trim()), [youtubeUrl]);
 
+  const clearEvidence = useCallback(() => {
+    if (evidenceVideoUrl) URL.revokeObjectURL(evidenceVideoUrl);
+    setEvidenceVideoUrl(null);
+    setEvidenceLoading(false);
+    setEvidenceError(null);
+  }, [evidenceVideoUrl]);
+
   const handleFileSelect = useCallback((f: File | null) => {
     setFile(f);
     setYoutubeUrl('');
     setResult(null);
     setError(null);
+    rawAnalysisRef.current = null;
+    clearEvidence();
     setState(f ? 'ready' : 'idle');
-  }, []);
+  }, [clearEvidence]);
 
   const handleUrlChange = useCallback((url: string) => {
     setYoutubeUrl(url);
@@ -698,11 +781,12 @@ export default function App() {
       setFile(null);
       setResult(null);
       setError(null);
+      clearEvidence();
       setState('ready');
     } else if (!file) {
       setState('idle');
     }
-  }, [file]);
+  }, [file, clearEvidence]);
 
   const handleAnalyze = useCallback(async () => {
     if (!file && !youtubeUrl.trim()) {
@@ -732,10 +816,11 @@ export default function App() {
       if (!response.ok) {
         throw new Error(`Backend responded ${response.status}`);
       }
-      const data = (await response.json()) as AnalyzeResult;
+      const data = await response.json();
+      rawAnalysisRef.current = data as Record<string, unknown>;
       // Brief hold so the analyzing state is perceivable on fast networks.
       await new Promise((r) => setTimeout(r, 600));
-      setResult(data);
+      setResult(data as AnalyzeResult);
       setState('ready');
     } catch (e) {
       // Backend not wired up yet (or unreachable) — fall back to demo data
@@ -747,6 +832,43 @@ export default function App() {
       console.warn('[VARify] /api/analyze unavailable — showing demo result.', message);
     }
   }, [file, youtubeUrl]);
+
+  const handleGenerateEvidence = useCallback(async () => {
+    if (!file || !result) return;
+
+    setEvidenceLoading(true);
+    setEvidenceError(null);
+    if (evidenceVideoUrl) {
+      URL.revokeObjectURL(evidenceVideoUrl);
+      setEvidenceVideoUrl(null);
+    }
+
+    try {
+      const analysisPayload = rawAnalysisRef.current ?? result;
+      const form = new FormData();
+      form.append('video', file);
+      form.append('analysis', JSON.stringify(analysisPayload));
+
+      const response = await fetch(apiUrl('/api/evidence-video'), {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!response.ok) {
+        const text = await response.text().catch(() => '');
+        throw new Error(`Server returned ${response.status}${text ? `: ${text}` : ''}`);
+      }
+
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setEvidenceVideoUrl(url);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setEvidenceError(`Evidence video failed — ${message}`);
+    } finally {
+      setEvidenceLoading(false);
+    }
+  }, [file, result, evidenceVideoUrl]);
 
   const fileName = file?.name ?? null;
 
@@ -807,6 +929,15 @@ export default function App() {
                   />
                   <ReviewSummaryCard result={result} />
                 </div>
+                {file && (
+                  <EvidenceVideoCard
+                    src={evidenceVideoUrl}
+                    isLoading={evidenceLoading}
+                    error={evidenceError}
+                    onGenerate={handleGenerateEvidence}
+                    decision={result.decision}
+                  />
+                )}
               </>
             ) : (
               <OriginalClipCard
