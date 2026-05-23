@@ -1,7 +1,7 @@
 package com.varify.backend.rocketride;
 
-import com.varify.backend.dto.RefereeDecisionRequest;
 import com.varify.backend.dto.RefereeDecisionResponse;
+import com.varify.backend.dto.VideoUpload;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,8 +27,8 @@ public class RocketRidePipelineService {
      * @param request The referee decision request with evidence moments
      * @return The decision response from the pipeline
      */
-    public RefereeDecisionResponse executeRefereeDecisionPipeline(RefereeDecisionRequest request) {
-        logger.info("Executing referee decision pipeline for request: {}", request.getDescription());
+    public RefereeDecisionResponse executeRefereeDecisionPipeline(VideoUpload request) {
+        logger.info("Executing referee decision pipeline for request: {}", request.label());
         
         // TODO: Implement RocketRide pipeline execution
         // 1. Create RocketRideClient
