@@ -164,21 +164,60 @@ h1 {
   margin-top: 6px;
 }
 
+.file-list {
+  display: grid;
+  gap: 8px;
+}
+
 .file-row {
   align-items: center;
   background: #eef5ef;
+  border: 1px solid transparent;
   border-radius: 8px;
   color: #2b3934;
+  cursor: pointer;
   display: flex;
   gap: 12px;
   justify-content: space-between;
   padding: 12px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.file-row.active {
+  background: #e1f0e5;
+  border-color: rgba(20, 103, 66, 0.35);
 }
 
 .file-row span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.video-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.video-card {
+  border: 1px solid rgba(16, 24, 32, 0.1);
+  border-radius: 8px;
+  margin: 0;
+  overflow: hidden;
+}
+
+.video-card.active {
+  border-color: rgba(20, 103, 66, 0.55);
+  box-shadow: 0 0 0 3px rgba(20, 103, 66, 0.12);
+}
+
+.video-card figcaption {
+  background: #f7faf8;
+  color: #2b3934;
+  font-size: 0.82rem;
+  font-weight: 800;
+  padding: 8px 10px;
 }
 
 .video-preview,
@@ -195,6 +234,7 @@ h1 {
 }
 
 .video-preview {
+  border-radius: 0;
   object-fit: contain;
 }
 
@@ -327,13 +367,26 @@ h1 {
   gap: 8px;
 }
 
-.timestamp-list span {
+.timestamp-list button,
+.evidence-timestamp {
   background: #101820;
+  border: 0;
   border-radius: 999px;
   color: #ffffff;
+  cursor: pointer;
   font-size: 0.9rem;
   font-weight: 800;
   padding: 7px 11px;
+}
+
+.timestamp-list button:hover,
+.evidence-timestamp:hover {
+  background: #146742;
+}
+
+.evidence-timestamp {
+  margin: 0 8px 6px 0;
+  vertical-align: middle;
 }
 
 .rule-strip {

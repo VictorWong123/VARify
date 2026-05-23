@@ -1,11 +1,14 @@
 package com.varify.backend.controller;
 
 import com.varify.backend.dto.RefereeDecisionResponse;
+import com.varify.backend.dto.VideoUpload;
 import com.varify.backend.service.RefereeDecisionService;
 import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -35,24 +38,35 @@ public class AnalysisController {
 
     @PostMapping(path = "/analyze", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<RefereeDecisionResponse> analyze(
-            @RequestParam("video") @NotNull MultipartFile video
+            @RequestParam("video") @NotNull List<MultipartFile> videos
     ) throws IOException {
-        if (video.isEmpty()) {
+        if (videos.isEmpty() || videos.stream().anyMatch(MultipartFile::isEmpty)) {
             return ResponseEntity.badRequest().build();
         }
 
-        Path tempFile = Files.createTempFile("varify-upload-", suffixFor(video.getOriginalFilename()));
+        List<Path> tempFiles = new ArrayList<>();
         try {
-            video.transferTo(tempFile);
-            RefereeDecisionResponse response = refereeDecisionService.decide(
-                    tempFile,
-                    video.getOriginalFilename(),
-                    video.getContentType(),
-                    video.getSize()
-            );
+            List<VideoUpload> uploads = new ArrayList<>();
+            for (int index = 0; index < videos.size(); index++) {
+                MultipartFile video = videos.get(index);
+                Path tempFile = Files.createTempFile("varify-upload-", suffixFor(video.getOriginalFilename()));
+                tempFiles.add(tempFile);
+                video.transferTo(tempFile);
+                uploads.add(new VideoUpload(
+                        tempFile,
+                        video.getOriginalFilename(),
+                        video.getContentType(),
+                        video.getSize(),
+                        index + 1
+                ));
+            }
+
+            RefereeDecisionResponse response = refereeDecisionService.decide(uploads);
             return ResponseEntity.ok(response);
         } finally {
-            Files.deleteIfExists(tempFile);
+            for (Path tempFile : tempFiles) {
+                Files.deleteIfExists(tempFile);
+            }
         }
     }
 

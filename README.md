@@ -20,8 +20,8 @@ VARify/
 - Node.js and npm for the React + TypeScript frontend.
 - Java 17 or newer for the Spring Boot backend.
 - Maven for the Spring Boot backend.
-- Optional AI provider keys for live analysis. Without keys, the backend should
-  run in mock mode so the demo still works.
+- Gemini and GMI Cloud credentials for live analysis. Without required keys, the
+  backend returns a configuration error instead of a fake decision.
 
 ## Environment Variables
 
@@ -29,23 +29,24 @@ The backend reads these variables:
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
-| `GEMINI_API_KEY` | Optional for mock mode | Google AI Studio Gemini video analysis key. |
-| `GMI_API_KEY` | Optional for mock mode | GMI Cloud API key for the Gemma decision model. |
-| `GMI_BASE_URL` | Optional for mock mode | GMI Cloud base URL. |
-| `GMI_MODEL` | Optional for mock mode | GMI model name to use for referee decisions. |
-| `ROCKETRIDE_API_KEY` | Optional | Placeholder/orchestration service key, if used. |
+| `GEMINI_API_KEY` | Yes | Google AI Studio Gemini video analysis key. |
+| `GEMINI_MODEL` | No | Gemini model for video analysis. Defaults to `gemini-2.5-flash`. |
+| `GMI_API_KEY` | Yes | GMI Cloud API key for the Gemma decision model. |
+| `GMI_BASE_URL` | No | GMI Cloud base URL. Defaults to `https://api.gmi-serving.com`. |
+| `GMI_MODEL` | Yes | Exact Gemma model id enabled in your GMI Cloud account. |
 
 Example local shell setup:
 
 ```sh
 export GEMINI_API_KEY="your-gemini-key"
+export GEMINI_MODEL="gemini-2.5-flash"
 export GMI_API_KEY="your-gmi-key"
 export GMI_BASE_URL="https://your-gmi-base-url"
 export GMI_MODEL="your-gemma-model"
-export ROCKETRIDE_API_KEY="optional-rocketride-key"
 ```
 
-For a keyless demo, leave these unset and use the backend mock response path.
+The app does not generate fake referee decisions. If required credentials are
+missing or invalid, `POST /api/analyze` returns a clear error message.
 
 ## Local Development
 
@@ -72,20 +73,6 @@ mvn spring-boot:run
 
 The backend exposes the API at `http://localhost:8080`.
 
-## Mock Mode
-
-The MVP remains demoable without external AI keys. If API keys are missing, the
-backend service layer falls back to a safe mock response instead of failing
-startup or blocking the upload flow.
-
-Expected mock behavior:
-
-- Accept the uploaded video file through `POST /api/analyze`.
-- Skip live Gemini and GMI Cloud calls when required keys are unavailable.
-- Return a realistic structured referee decision response.
-- Include `modelTrace` values that make it clear whether the response used mock
-  services or live providers.
-
 ## API
 
 ### Health Check
@@ -105,51 +92,60 @@ Expected successful response shape:
 
 ### Analyze Video
 
-`POST /api/analyze` accepts a multipart upload field named `video`.
+`POST /api/analyze` accepts one or more multipart upload fields named `video`.
 
 ```sh
 curl -X POST http://localhost:8080/api/analyze \
-  -F "video=@/path/to/soccer-clip.mp4"
+  -F "video=@/path/to/wide-angle.mp4" \
+  -F "video=@/path/to/reverse-angle.mp4"
 ```
 
 Expected response shape:
 
 ```json
 {
-  "decision": "YELLOW_CARD",
-  "confidence": 82,
-  "keyTimestamp": "00:07-00:09",
-  "ruleCategory": "reckless",
-  "explanation": "The tackle appears reckless because the player arrives late, makes contact with the opponent's leg, and does not clearly play the ball.",
+  "decision": "RED_CARD",
+  "confidence": 94,
+  "keyTimestamp": "01:23",
+  "keyTimestamps": ["01:23"],
+  "keyMoments": [
+    {
+      "timestamp": "01:23",
+      "timestampSeconds": 83.0,
+      "videoIndex": 2,
+      "videoLabel": "Video 2",
+      "description": "Reverse angle shows high contact with excessive force."
+    }
+  ],
+  "ruleCategory": "serious foul play",
+  "explanation": "The challenge endangers player safety with excessive force.",
   "evidence": [
     {
-      "timestamp": "00:07",
-      "description": "Defender arrives late as attacker touches the ball forward."
-    },
-    {
-      "timestamp": "00:08",
-      "description": "Contact appears to be made with the opponent's lower leg."
+      "timestamp": "01:23",
+      "timestampSeconds": 83.0,
+      "videoIndex": 2,
+      "videoLabel": "Video 2",
+      "description": "Gemini identified the point of contact from the second angle."
     }
   ],
   "geminiSummary": "Short summary of the visual incident.",
   "modelTrace": {
-    "videoAnalyzer": "Gemini or mock",
-    "orchestrator": "RocketRide placeholder",
-    "decisionModel": "Gemma on GMI Cloud or mock"
+    "videoAnalyzer": "Gemini live analysis",
+    "decisionModel": "Gemma on GMI Cloud live decision"
   }
 }
 ```
 
 ## AI Pipeline
 
-The intended backend flow is:
+The backend flow is:
 
-1. `VideoAnalysisService` sends the uploaded clip to Gemini, or returns a mock
-   analysis when Gemini is not configured.
-2. `RocketRideOrchestrationService` coordinates the workflow and builds a
-   structured referee decision prompt from the video analysis.
-3. `RefereeDecisionService` sends the structured incident summary to a GMI Cloud
-   Gemma model, or returns a mock referee decision when GMI is not configured.
+1. `VideoAnalysisService` uploads each video angle to Gemini and requests
+   structured JSON with incident timestamps and visual evidence.
+2. `RefereeDecisionService` sends Gemini's structured incident summary to the
+   configured GMI Cloud Gemma model.
+3. The backend returns Gemma's structured card decision and Gemini/Gemma trace
+   metadata for transparency.
 
 The MVP does not require authentication or a database.
 
