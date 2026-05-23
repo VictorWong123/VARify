@@ -1,17 +1,15 @@
 import {
-  ChangeEvent,
   DragEvent,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from 'react';
 import type { AnalyzeResult, Decision } from './types';
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Mock data — used until the backend is wired up (or as a graceful
-   fallback if /api/analyze isn't reachable). Mirrors the API contract.
+   Mock data — used only when the backend is genuinely unreachable, so the
+   UI flow can still be reviewed in isolation.
    ───────────────────────────────────────────────────────────────────────── */
 
 const MOCK_RESULT: AnalyzeResult = {
@@ -22,6 +20,9 @@ const MOCK_RESULT: AnalyzeResult = {
   timestamps: { start: '00:06.8', end: '00:09.2', label: 'Incident start to contact' },
   confidence: 0.82,
 };
+
+const MAX_ANGLES = 3;
+const ACCEPTED_VIDEO = 'video/mp4,video/quicktime,video/x-msvideo,video/webm,.mp4,.mov,.avi,.webm';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Helpers
@@ -52,12 +53,6 @@ function decisionClass(d: Decision) {
   return 'varify-decision-yellow';
 }
 
-const YT_RX = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/;
-function youTubeId(url: string): string | null {
-  const m = url.match(YT_RX);
-  return m ? m[1] : null;
-}
-
 function parseTimestamp(ts: string): number {
   if (!ts) return 0;
   const parts = ts.split(':').map((p) => p.trim());
@@ -83,20 +78,48 @@ function decisionVariant(d: Decision): DecisionVariant {
   return 'yellow';
 }
 
+interface AngleEntry {
+  id: string;
+  file: File;
+  url: string;
+}
+
+function camLabel(index: number) {
+  return `CAM ${String(index + 1).padStart(2, '0')}`;
+}
+
+function fileKey(f: File) {
+  return `${f.name}::${f.size}::${f.lastModified}`;
+}
+
+let _angleSeqId = 0;
+function nextAngleId() {
+  _angleSeqId += 1;
+  return `angle-${_angleSeqId}`;
+}
+
+interface MarkerAngle {
+  key: string;
+  label: string;
+}
+
 interface FoulMarker {
   startTime: number;
   endTime: number;
   label?: string;
   displayStart?: string;
   variant?: DecisionVariant;
+  angles?: MarkerAngle[];
+  activeAngleIndex?: number;
+  onSelectAngle?: (index: number) => void;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
    Backend response normalizer
 
-   The backend (Spring controller `AnalysisController`) returns
-   `RefereeDecisionResponse` whose field names and value shapes don't match
-   this UI's `AnalyzeResult`. Adapt here rather than reshape the API.
+   The backend (Spring `AnalysisController`) returns `RefereeDecisionResponse`
+   whose field names and value shapes don't match this UI's `AnalyzeResult`.
+   Adapt here rather than reshape the API.
    ───────────────────────────────────────────────────────────────────────── */
 
 function mapDecision(value: unknown): Decision {
@@ -164,71 +187,7 @@ function normalizeBackendResponse(raw: any): AnalyzeResult {
    ───────────────────────────────────────────────────────────────────────── */
 
 function Backdrop() {
-  return (
-    <div className="varify-backdrop" aria-hidden>
-      <div className="varify-glow varify-glow--top-left" />
-      <div className="varify-glow varify-glow--top-right" />
-
-      <svg
-        className="varify-ribbons"
-        viewBox="0 0 1500 1000"
-        preserveAspectRatio="xMidYMid slice"
-      >
-        {/* Red ribbon sweeping across the top */}
-        <path
-          d="M -120 80 C 280 -40, 620 220, 980 100 S 1640 60, 1700 200"
-          stroke="#ef233c"
-          strokeOpacity="0.22"
-          strokeWidth="170"
-          strokeLinecap="round"
-          fill="none"
-        />
-
-        {/* Blue ribbon from top-right */}
-        <path
-          d="M 1620 -60 C 1380 220, 1120 60, 880 320 S 360 540, 60 360"
-          stroke="#2563eb"
-          strokeOpacity="0.20"
-          strokeWidth="150"
-          strokeLinecap="round"
-          fill="none"
-        />
-
-        {/* Green ribbon along bottom-left */}
-        <path
-          d="M -160 980 C 220 760, 540 1080, 820 820 S 1300 920, 1620 760"
-          stroke="#22c55e"
-          strokeOpacity="0.18"
-          strokeWidth="170"
-          strokeLinecap="round"
-          fill="none"
-        />
-
-        {/* Orange ribbon hugging bottom-right */}
-        <path
-          d="M 1640 1060 C 1320 880, 980 1100, 660 940 S 100 1140, -180 940"
-          stroke="#f97316"
-          strokeOpacity="0.18"
-          strokeWidth="130"
-          strokeLinecap="round"
-          fill="none"
-        />
-
-        {/* Purple thin accent through the middle */}
-        <path
-          d="M -80 560 C 320 480, 700 660, 1080 500 S 1480 360, 1700 460"
-          stroke="#8b5cf6"
-          strokeOpacity="0.14"
-          strokeWidth="80"
-          strokeLinecap="round"
-          fill="none"
-        />
-      </svg>
-
-      <div className="varify-grain" />
-      <div className="varify-vignette" />
-    </div>
-  );
+  return <div className="varify-backdrop" aria-hidden />;
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -253,7 +212,7 @@ function HeroHeader() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Inline icons (kept minimal — spec says "no extra icons")
+   Inline icons
    ───────────────────────────────────────────────────────────────────────── */
 
 function PlayIcon() {
@@ -274,7 +233,7 @@ function PauseIcon() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   Placeholder pitch (used when no video is available)
+   Placeholder pitch (when no video is available)
    ───────────────────────────────────────────────────────────────────────── */
 
 function PitchPlaceholder() {
@@ -302,20 +261,21 @@ function PitchPlaceholder() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   SimpleVideoPlayer — shared minimal player for Original + AI Review
+   SimpleVideoPlayer — shared minimal player. Supports an optional marker
+   (single circle or cluster of N circles per camera angle).
+   When marker is set, every new src auto-seeks to marker.startTime + plays,
+   so switching angles via circles lands on the foul moment instantly.
    ───────────────────────────────────────────────────────────────────────── */
 
 const SPEED_CYCLE = [1, 1.25, 1.5, 2];
 
 function SimpleVideoPlayer({
   src,
-  youtubeId,
   fallbackLabel,
   fallbackHint,
   marker,
 }: {
   src?: string;
-  youtubeId?: string | null;
   fallbackLabel: string;
   fallbackHint?: string;
   marker?: FoulMarker;
@@ -331,7 +291,7 @@ function SimpleVideoPlayer({
     setCurrent(0);
     setDuration(0);
     setSpeedIdx(0);
-  }, [src, youtubeId]);
+  }, [src]);
 
   const togglePlay = useCallback(() => {
     const v = videoRef.current;
@@ -377,7 +337,7 @@ function SimpleVideoPlayer({
   const speed = SPEED_CYCLE[speedIdx];
   const speedLabel = `${speed.toFixed(speed % 1 === 0 ? 1 : 2)}x`;
 
-  const markerActive = !!marker && !youtubeId;
+  const markerActive = !!marker && !!src;
   const markerStartPct =
     markerActive && displayedDuration > 0
       ? Math.max(0, Math.min(100, (marker!.startTime / displayedDuration) * 100))
@@ -391,27 +351,42 @@ function SimpleVideoPlayer({
       ? Math.max(0, markerEndPct - markerStartPct)
       : 0;
   const markerVariant = marker?.variant ?? 'yellow';
-  const markerTooltip = marker
-    ? `${marker.displayStart ?? fmtTime(marker.startTime)}${marker.label ? ` · ${marker.label}` : ''}`
-    : '';
+  const markerAngles = marker?.angles ?? [];
+  const isMulti = markerAngles.length > 1;
+  const activeAngleIndex = marker?.activeAngleIndex ?? 0;
+
+  // List of circles to render. If no per-angle data was passed, render a
+  // single circle (preserves the single-clip UX). Otherwise render one
+  // circle per angle, all anchored to the foul moment.
+  const circles =
+    markerActive
+      ? markerAngles.length > 0
+        ? markerAngles
+        : [{ key: 'solo', label: 'Foul' }]
+      : [];
 
   return (
     <div>
       <div className="varify-player-stage">
-        {youtubeId ? (
-          <iframe
-            src={`https://www.youtube.com/embed/${youtubeId}?rel=0&modestbranding=1`}
-            title="Original clip"
-            allow="accelerometer; encrypted-media; picture-in-picture"
-            allowFullScreen
-          />
-        ) : src ? (
+        {src ? (
           <video
             ref={videoRef}
             src={src}
             preload="metadata"
             playsInline
-            onLoadedMetadata={(e) => setDuration(e.currentTarget.duration || 0)}
+            onLoadedMetadata={(e) => {
+              const v = e.currentTarget;
+              setDuration(v.duration || 0);
+              // Auto-seek + play whenever a marker'd source loads (initial
+              // appearance or angle switch). Falls back silently if the
+              // browser blocks autoplay before any user gesture.
+              if (marker) {
+                const t = Math.max(0, Math.min(marker.startTime, v.duration || marker.startTime));
+                v.currentTime = t;
+                setCurrent(t);
+                v.play().catch(() => {});
+              }
+            }}
             onTimeUpdate={(e) => setCurrent(e.currentTarget.currentTime)}
             onPlay={() => setIsPlaying(true)}
             onPause={() => setIsPlaying(false)}
@@ -433,7 +408,7 @@ function SimpleVideoPlayer({
           type="button"
           className="varify-play-btn"
           onClick={togglePlay}
-          disabled={!src || !!youtubeId}
+          disabled={!src}
           aria-label={isPlaying ? 'Pause' : 'Play'}
         >
           {isPlaying ? <PauseIcon /> : <PlayIcon />}
@@ -461,17 +436,41 @@ function SimpleVideoPlayer({
             )}
           </div>
           {markerActive && markerStartPct !== null && (
-            <button
-              type="button"
-              className={`varify-progress-marker varify-progress-marker--${markerVariant}`}
+            <div
+              className="varify-progress-cluster"
               style={{ left: `${markerStartPct}%` }}
-              onClick={(e) => {
-                e.stopPropagation();
-                if (src) seekToTime(marker!.startTime);
-              }}
-              data-tooltip={markerTooltip}
-              aria-label={`Jump to foul at ${marker!.displayStart ?? fmtTime(marker!.startTime)}`}
-            />
+            >
+              {circles.map((angle, i) => {
+                const active = isMulti && i === activeAngleIndex;
+                const tooltipBase = marker!.displayStart ?? fmtTime(marker!.startTime);
+                const tooltip = isMulti
+                  ? `${angle.label} · ${tooltipBase}`
+                  : `${tooltipBase}${marker!.label ? ` · ${marker!.label}` : ''}`;
+                return (
+                  <button
+                    key={angle.key}
+                    type="button"
+                    className={`varify-progress-marker varify-progress-marker--${markerVariant}${active ? ' is-active' : ''}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (isMulti && i !== activeAngleIndex) {
+                        marker!.onSelectAngle?.(i);
+                      } else if (src) {
+                        seekToTime(marker!.startTime);
+                      }
+                    }}
+                    data-tooltip={tooltip}
+                    aria-label={
+                      isMulti
+                        ? `Show ${angle.label} at ${tooltipBase}`
+                        : `Jump to foul at ${tooltipBase}`
+                    }
+                  >
+                    {isMulti ? i + 1 : null}
+                  </button>
+                );
+              })}
+            </div>
           )}
         </div>
         <button type="button" className="varify-speed" onClick={cycleSpeed} disabled={!src}>
@@ -483,24 +482,22 @@ function SimpleVideoPlayer({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   1) UploadPanel
+   1) UploadPanel — multi-angle dropzone (up to MAX_ANGLES)
    ───────────────────────────────────────────────────────────────────────── */
 
 type UploadState = 'idle' | 'ready' | 'analyzing' | 'error';
 
 function UploadPanel({
-  fileName,
-  youtubeUrl,
-  onFileSelect,
-  onUrlChange,
+  angles,
+  onFilesSelect,
+  onRemoveAngle,
   onAnalyze,
   state,
   error,
 }: {
-  fileName: string | null;
-  youtubeUrl: string;
-  onFileSelect: (file: File | null) => void;
-  onUrlChange: (url: string) => void;
+  angles: AngleEntry[];
+  onFilesSelect: (files: FileList | null) => void;
+  onRemoveAngle: (id: string) => void;
   onAnalyze: () => void;
   state: UploadState;
   error: string | null;
@@ -508,85 +505,111 @@ function UploadPanel({
   const [dragging, setDragging] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    setDragging(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) onFileSelect(f);
-  };
-
-  const armed = state === 'ready' || (state === 'idle' && (fileName || youtubeUrl.trim()));
+  const atCapacity = angles.length >= MAX_ANGLES;
   const isAnalyzing = state === 'analyzing';
+  const armed = angles.length > 0 && !isAnalyzing;
 
   return (
     <section className="varify-card varify-card--accent">
-      <h2 className="varify-card-title">Upload or Paste a Link</h2>
+      <div className="varify-card-title-row">
+        <h2 className="varify-card-title">Upload Angles</h2>
+        <span className="varify-count-pill">
+          {angles.length}/{MAX_ANGLES}
+        </span>
+      </div>
       <div className="varify-upload">
         <div className="varify-upload-section">
-          <span className="varify-label">Upload Video File</span>
+          <span className="varify-label">
+            Add up to {MAX_ANGLES} angles of the same incident
+          </span>
           <div
-            className={`varify-dropzone${dragging ? ' is-drag' : ''}${fileName ? ' is-ready' : ''}`}
+            className={`varify-dropzone${dragging ? ' is-drag' : ''}${atCapacity ? ' is-ready' : ''}`}
             onDragOver={(e) => {
+              if (atCapacity || isAnalyzing) return;
               e.preventDefault();
               setDragging(true);
             }}
             onDragLeave={() => setDragging(false)}
-            onDrop={handleDrop}
+            onDrop={(e) => {
+              if (atCapacity || isAnalyzing) return;
+              e.preventDefault();
+              setDragging(false);
+              onFilesSelect(e.dataTransfer.files);
+            }}
           >
             <input
               ref={inputRef}
               type="file"
-              accept="video/mp4,video/quicktime,video/x-msvideo,video/webm,.mp4,.mov,.avi,.webm"
-              onChange={(e: ChangeEvent<HTMLInputElement>) => {
-                const f = e.target.files?.[0];
-                if (f) onFileSelect(f);
+              accept={ACCEPTED_VIDEO}
+              multiple
+              disabled={atCapacity || isAnalyzing}
+              onChange={(e) => {
+                onFilesSelect(e.target.files);
+                e.target.value = '';
               }}
-              aria-label="Upload video file"
+              aria-label="Upload video files"
             />
             <p className="varify-dropzone-text">
-              {fileName ? (
+              {atCapacity ? (
                 <>
-                  <strong>{fileName}</strong>
+                  <strong>Maximum {MAX_ANGLES} angles cued</strong>
                   <br />
-                  Ready to analyze
+                  Remove one to add a different angle
                 </>
+              ) : angles.length === 0 ? (
+                <>Drag and drop your videos here</>
               ) : (
-                <>Drag and drop your video here</>
+                <>
+                  <strong>{angles.length} angle{angles.length === 1 ? '' : 's'} cued</strong>
+                  <br />
+                  Add another or analyze
+                </>
               )}
             </p>
             <button
               type="button"
               className="varify-choose-btn"
+              disabled={atCapacity || isAnalyzing}
               onClick={(e) => {
                 e.stopPropagation();
                 inputRef.current?.click();
               }}
             >
-              Choose File
+              {angles.length === 0 ? 'Choose Files' : 'Add Angle'}
             </button>
           </div>
-        </div>
 
-        <div className="varify-divider">Or</div>
-
-        <div className="varify-upload-section">
-          <span className="varify-label">Or paste a YouTube link</span>
-          <input
-            className="varify-url-input"
-            type="url"
-            placeholder="https://www.youtube.com/watch?v=..."
-            value={youtubeUrl}
-            onChange={(e) => onUrlChange(e.target.value)}
-            spellCheck={false}
-            autoCorrect="off"
-          />
+          {angles.length > 0 && (
+            <ul className="varify-angle-chips" aria-label="Queued angles">
+              {angles.map((a, i) => (
+                <li key={a.id} className="varify-angle-chip">
+                  <span className="varify-angle-chip-num">{camLabel(i)}</span>
+                  <span className="varify-angle-chip-name" title={a.file.name}>
+                    {a.file.name}
+                  </span>
+                  <span className="varify-angle-chip-size">
+                    {(a.file.size / 1024 / 1024).toFixed(1)} MB
+                  </span>
+                  <button
+                    type="button"
+                    className="varify-angle-chip-remove"
+                    onClick={() => onRemoveAngle(a.id)}
+                    aria-label={`Remove ${camLabel(i)}`}
+                    disabled={isAnalyzing}
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         <button
           type="button"
           className={`varify-analyze-btn${isAnalyzing ? ' is-loading' : ''}`}
           onClick={onAnalyze}
-          disabled={!armed || isAnalyzing}
+          disabled={!armed}
         >
           {isAnalyzing ? 'Analyzing…' : 'Analyze'}
         </button>
@@ -598,29 +621,68 @@ function UploadPanel({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
+   Cam tabs — segmented switcher above a video when there are multiple angles
+   ───────────────────────────────────────────────────────────────────────── */
+
+function CamTabs({
+  count,
+  activeIndex,
+  onSelect,
+}: {
+  count: number;
+  activeIndex: number;
+  onSelect: (i: number) => void;
+}) {
+  if (count <= 1) return null;
+  return (
+    <div className="varify-cam-tabs" role="tablist" aria-label="Switch camera angle">
+      {Array.from({ length: count }, (_, i) => (
+        <button
+          key={i}
+          type="button"
+          role="tab"
+          aria-selected={i === activeIndex}
+          className={`varify-cam-tab${i === activeIndex ? ' is-active' : ''}`}
+          onClick={() => onSelect(i)}
+        >
+          {camLabel(i)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
    2) OriginalClipCard
    ───────────────────────────────────────────────────────────────────────── */
 
 function OriginalClipCard({
-  fileUrl,
-  fileName,
-  youtubeId,
+  angles,
+  activeIndex,
+  onSelectAngle,
   remoteUrl,
   compact = false,
 }: {
-  fileUrl: string | null;
-  fileName: string | null;
-  youtubeId: string | null;
+  angles: AngleEntry[];
+  activeIndex: number;
+  onSelectAngle: (i: number) => void;
   remoteUrl?: string;
   compact?: boolean;
 }) {
+  const active = angles[activeIndex];
+  const src = active?.url ?? remoteUrl;
+  const fallbackLabel =
+    angles.length > 0 ? `Loading ${camLabel(activeIndex)}…` : `Upload up to ${MAX_ANGLES} angles to analyze`;
+
   return (
     <section className={`varify-card${compact ? ' varify-card--compact varify-reveal' : ''}`}>
-      <h2 className="varify-card-title">Original Clip</h2>
+      <div className="varify-card-title-row">
+        <h2 className="varify-card-title">Original Clip</h2>
+        <CamTabs count={angles.length} activeIndex={activeIndex} onSelect={onSelectAngle} />
+      </div>
       <SimpleVideoPlayer
-        src={fileUrl ?? remoteUrl ?? undefined}
-        youtubeId={youtubeId}
-        fallbackLabel={fileName ? `Loading ${fileName}…` : 'Upload a clip or paste a YouTube link'}
+        src={src}
+        fallbackLabel={fallbackLabel}
         fallbackHint="MP4 · MOV · AVI · WEBM"
       />
     </section>
@@ -628,26 +690,47 @@ function OriginalClipCard({
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   3) AIReviewCard
+   3) AIReviewCard — big screen with multi-angle circle cluster on timeline
    ───────────────────────────────────────────────────────────────────────── */
 
 function AIReviewCard({
-  src,
+  angles,
+  activeIndex,
+  onSelectAngle,
   decisionLabel,
   marker,
+  remoteUrl,
 }: {
-  src?: string;
+  angles: AngleEntry[];
+  activeIndex: number;
+  onSelectAngle: (i: number) => void;
   decisionLabel: string;
-  marker?: FoulMarker;
+  marker: Omit<FoulMarker, 'angles' | 'activeAngleIndex' | 'onSelectAngle'>;
+  remoteUrl?: string;
 }) {
+  const active = angles[activeIndex];
+  const src = remoteUrl ?? active?.url;
+
   return (
     <section className="varify-card varify-reveal">
-      <h2 className="varify-card-title">AI Review (Highlight)</h2>
+      <div className="varify-card-title-row">
+        <h2 className="varify-card-title">AI Review (Highlight)</h2>
+        {angles.length > 1 && (
+          <span className="varify-card-eyebrow">
+            Viewing {camLabel(activeIndex)} · click a circle to switch angle
+          </span>
+        )}
+      </div>
       <SimpleVideoPlayer
         src={src}
         fallbackLabel="AI highlight ready"
         fallbackHint={decisionLabel}
-        marker={marker}
+        marker={{
+          ...marker,
+          angles: angles.map((a, i) => ({ key: a.id, label: camLabel(i) })),
+          activeAngleIndex: activeIndex,
+          onSelectAngle,
+        }}
       />
     </section>
   );
@@ -690,7 +773,7 @@ function ConfidenceCard({ result }: { result: AnalyzeResult }) {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   4) ReviewSummaryCard
+   4) ReviewSummaryCard (Confidence moved out — see ConfidenceCard)
    ───────────────────────────────────────────────────────────────────────── */
 
 function ReviewSummaryCard({ result }: { result: AnalyzeResult }) {
@@ -732,56 +815,58 @@ function ReviewSummaryCard({ result }: { result: AnalyzeResult }) {
    ───────────────────────────────────────────────────────────────────────── */
 
 export default function App() {
-  const [file, setFile] = useState<File | null>(null);
-  const [fileUrl, setFileUrl] = useState<string | null>(null);
-  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [angles, setAngles] = useState<AngleEntry[]>([]);
   const [state, setState] = useState<UploadState>('idle');
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<AnalyzeResult | null>(null);
+  const [originalActiveIndex, setOriginalActiveIndex] = useState(0);
+  const [reviewActiveIndex, setReviewActiveIndex] = useState(0);
 
-  // Manage object URL lifecycle for the uploaded file
+  // Clamp active indices when the angles list shrinks.
   useEffect(() => {
-    if (!file) {
-      setFileUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setFileUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
+    const max = Math.max(0, angles.length - 1);
+    setOriginalActiveIndex((i) => Math.min(i, max));
+    setReviewActiveIndex((i) => Math.min(i, max));
+  }, [angles.length]);
 
-  const ytId = useMemo(() => youTubeId(youtubeUrl.trim()), [youtubeUrl]);
-
-  const handleFileSelect = useCallback((f: File | null) => {
-    setFile(f);
-    setYoutubeUrl('');
+  const handleFilesSelect = useCallback((files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    setAngles((current) => {
+      const remaining = MAX_ANGLES - current.length;
+      if (remaining <= 0) return current;
+      const seen = new Set(current.map((a) => fileKey(a.file)));
+      const additions: AngleEntry[] = [];
+      for (const file of Array.from(files)) {
+        if (additions.length >= remaining) break;
+        const key = fileKey(file);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        additions.push({
+          id: nextAngleId(),
+          file,
+          url: URL.createObjectURL(file),
+        });
+      }
+      return additions.length > 0 ? [...current, ...additions] : current;
+    });
     setResult(null);
     setError(null);
-    setState(f ? 'ready' : 'idle');
+    setState((s) => (s === 'error' ? 'idle' : s));
   }, []);
 
-  const handleUrlChange = useCallback((url: string) => {
-    setYoutubeUrl(url);
-    if (url.trim()) {
-      setFile(null);
-      setResult(null);
-      setError(null);
-      setState('ready');
-    } else if (!file) {
-      setState('idle');
-    }
-  }, [file]);
+  const handleRemoveAngle = useCallback((id: string) => {
+    setAngles((current) => {
+      const removed = current.find((a) => a.id === id);
+      if (removed) URL.revokeObjectURL(removed.url);
+      return current.filter((a) => a.id !== id);
+    });
+    setResult(null);
+    setError(null);
+  }, []);
 
   const handleAnalyze = useCallback(async () => {
-    if (!file && !youtubeUrl.trim()) {
-      setError('Upload a video or paste a YouTube link first.');
-      setState('error');
-      return;
-    }
-
-    if (!file && youtubeUrl.trim()) {
-      // Backend currently only accepts multipart video uploads.
-      setError('YouTube link analysis isn\'t supported by the backend yet. Upload a local video file to run analysis.');
+    if (angles.length === 0) {
+      setError('Upload at least one video angle first.');
       setState('error');
       return;
     }
@@ -792,7 +877,7 @@ export default function App() {
 
     try {
       const form = new FormData();
-      form.append('video', file!);
+      angles.forEach((a) => form.append('video', a.file));
       const response = await fetch(apiUrl('/api/analyze'), { method: 'POST', body: form });
 
       if (!response.ok) {
@@ -808,7 +893,7 @@ export default function App() {
             if (txt.trim()) detail = txt;
           }
         } catch {
-          /* keep the status-line fallback */
+          /* keep status-line fallback */
         }
         throw new Error(detail);
       }
@@ -816,12 +901,10 @@ export default function App() {
       const raw = await response.json();
       setResult(normalizeBackendResponse(raw));
       setState('ready');
+      setOriginalActiveIndex(0);
+      setReviewActiveIndex(0);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      // `fetch` throws TypeError only when the request itself never made it
-      // (DNS, connection refused, CORS preflight blocked, etc.). A 4xx/5xx
-      // from the backend is a successful round-trip and goes through the
-      // throw above — those carry real diagnostic text and must be shown.
       const isNetworkFailure =
         e instanceof TypeError && /failed to fetch|network|load failed/i.test(message);
 
@@ -832,14 +915,25 @@ export default function App() {
         );
         setResult(MOCK_RESULT);
         setState('ready');
+        setOriginalActiveIndex(0);
+        setReviewActiveIndex(0);
       } else {
         setError(message);
         setState('error');
       }
     }
-  }, [file, youtubeUrl]);
+  }, [angles]);
 
-  const fileName = file?.name ?? null;
+  const uploadPanel = (
+    <UploadPanel
+      angles={angles}
+      onFilesSelect={handleFilesSelect}
+      onRemoveAngle={handleRemoveAngle}
+      onAnalyze={handleAnalyze}
+      state={state}
+      error={error}
+    />
+  );
 
   return (
     <div className="varify-app">
@@ -852,34 +946,21 @@ export default function App() {
           {result ? (
             <div className="varify-left">
               <ConfidenceCard result={result} />
-              <UploadPanel
-                fileName={fileName}
-                youtubeUrl={youtubeUrl}
-                onFileSelect={handleFileSelect}
-                onUrlChange={handleUrlChange}
-                onAnalyze={handleAnalyze}
-                state={state}
-                error={error}
-              />
+              {uploadPanel}
             </div>
           ) : (
-            <UploadPanel
-              fileName={fileName}
-              youtubeUrl={youtubeUrl}
-              onFileSelect={handleFileSelect}
-              onUrlChange={handleUrlChange}
-              onAnalyze={handleAnalyze}
-              state={state}
-              error={error}
-            />
+            uploadPanel
           )}
 
           <div className="varify-right">
             {result ? (
               <>
                 <AIReviewCard
-                  src={result.aiReviewVideoUrl ?? fileUrl ?? undefined}
+                  angles={angles}
+                  activeIndex={reviewActiveIndex}
+                  onSelectAngle={setReviewActiveIndex}
                   decisionLabel={`${result.decision} · ${result.decisionSubtitle}`}
+                  remoteUrl={result.aiReviewVideoUrl}
                   marker={{
                     startTime: parseTimestamp(result.timestamps.start),
                     endTime: parseTimestamp(result.timestamps.end),
@@ -890,9 +971,9 @@ export default function App() {
                 />
                 <div className="varify-results-grid">
                   <OriginalClipCard
-                    fileUrl={fileUrl}
-                    fileName={fileName}
-                    youtubeId={ytId}
+                    angles={angles}
+                    activeIndex={originalActiveIndex}
+                    onSelectAngle={setOriginalActiveIndex}
                     remoteUrl={result.originalClipUrl}
                     compact
                   />
@@ -901,16 +982,16 @@ export default function App() {
               </>
             ) : (
               <OriginalClipCard
-                fileUrl={fileUrl}
-                fileName={fileName}
-                youtubeId={ytId}
+                angles={angles}
+                activeIndex={originalActiveIndex}
+                onSelectAngle={setOriginalActiveIndex}
               />
             )}
           </div>
         </div>
 
         <footer className="varify-footer">
-          Upload clip · Analyze · AI review + referee summary
+          Upload up to {MAX_ANGLES} angles · Analyze · AI review + referee summary
         </footer>
       </main>
     </div>

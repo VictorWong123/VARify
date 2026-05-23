@@ -2,8 +2,8 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #030712;
-  --bg-deep: #050816;
+  --bg: #000000;
+  --bg-deep: #000000;
   --panel: rgba(8, 12, 28, 0.78);
   --panel-strong: rgba(10, 14, 30, 0.92);
   --text: #f8fafc;
@@ -233,9 +233,138 @@ body {
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 18px;
+  flex-wrap: wrap;
 }
 
 .varify-card-title-row .varify-card-title { margin: 0; }
+
+.varify-card-eyebrow {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--muted-2);
+}
+
+.varify-count-pill {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--blue-soft);
+  background: rgba(37, 99, 235, 0.12);
+  border: 1px solid rgba(96, 165, 250, 0.30);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ───── Cam tabs (above Original Clip when multi-angle) ───── */
+
+.varify-cam-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(2, 6, 16, 0.55);
+  border: 1px solid var(--border);
+}
+
+.varify-cam-tab {
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  color: var(--muted-2);
+  background: transparent;
+  border: none;
+  padding: 5px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 140ms ease, color 140ms ease;
+  font-variant-numeric: tabular-nums;
+}
+
+.varify-cam-tab:hover {
+  color: var(--text);
+  background: rgba(96, 165, 250, 0.10);
+}
+
+.varify-cam-tab.is-active {
+  color: var(--text);
+  background: var(--blue);
+  box-shadow: 0 4px 14px rgba(37, 99, 235, 0.30);
+}
+
+/* ───── Queued-angle chips (inside the Upload panel) ───── */
+
+.varify-angle-chips {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.varify-angle-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: rgba(2, 6, 16, 0.55);
+  font-size: 13px;
+}
+
+.varify-angle-chip-num {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--blue-soft);
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+
+.varify-angle-chip-name {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.varify-angle-chip-size {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted-2);
+}
+
+.varify-angle-chip-remove {
+  background: none;
+  border: none;
+  color: var(--muted-2);
+  font-size: 18px;
+  cursor: pointer;
+  padding: 0 4px;
+  border-radius: 4px;
+  line-height: 1;
+  transition: color 140ms ease, background 140ms ease;
+}
+
+.varify-angle-chip-remove:hover:not(:disabled) {
+  color: var(--red);
+  background: rgba(239, 68, 68, 0.10);
+}
+
+.varify-angle-chip-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 /* ───── Upload panel ───── */
 
@@ -548,46 +677,71 @@ body {
 .varify-progress-band--red    { background: rgba(239, 68, 68, 0.45); }
 .varify-progress-band--green  { background: rgba(34, 197, 94, 0.45); }
 
-.varify-progress-marker {
+.varify-progress-cluster {
   position: absolute;
   top: 50%;
-  width: 14px;
-  height: 14px;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  z-index: 3;
+  pointer-events: auto;
+}
+
+.varify-progress-marker {
+  position: relative;
+  width: 16px;
+  height: 16px;
   margin: 0;
   padding: 0;
   border-radius: 50%;
-  border: 2px solid var(--yellow);
+  border: 2px solid var(--marker-color, var(--yellow));
   background: var(--bg-deep);
-  transform: translate(-50%, -50%);
   cursor: pointer;
-  z-index: 3;
-  transition: transform 160ms ease, background 160ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  line-height: 1;
+  transition: transform 160ms ease, background 160ms ease, color 160ms ease;
   animation: marker-pulse 1.8s ease-in-out infinite;
+  --marker-color: var(--yellow);
   --pulse: rgba(250, 204, 21, 0.55);
 }
 
 .varify-progress-marker--yellow {
-  border-color: var(--yellow);
+  --marker-color: var(--yellow);
   --pulse: rgba(250, 204, 21, 0.55);
 }
 .varify-progress-marker--red {
-  border-color: var(--red);
+  --marker-color: var(--red);
   --pulse: rgba(239, 68, 68, 0.55);
 }
 .varify-progress-marker--green {
-  border-color: var(--green);
+  --marker-color: var(--green);
   --pulse: rgba(34, 197, 94, 0.55);
 }
 
 .varify-progress-marker:hover,
 .varify-progress-marker:focus-visible {
-  transform: translate(-50%, -50%) scale(1.25);
-  background: currentColor;
+  transform: scale(1.22);
 }
 
-.varify-progress-marker--yellow:hover { color: var(--yellow); }
-.varify-progress-marker--red:hover    { color: var(--red); }
-.varify-progress-marker--green:hover  { color: var(--green); }
+.varify-progress-marker.is-active {
+  background: var(--marker-color);
+  color: var(--bg-deep);
+  transform: scale(1.18);
+}
+
+.varify-progress-marker.is-active:hover,
+.varify-progress-marker.is-active:focus-visible {
+  transform: scale(1.30);
+}
 
 @keyframes marker-pulse {
   0%, 100% { box-shadow: 0 0 0 0 var(--pulse); }
