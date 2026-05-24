@@ -1,7 +1,9 @@
 package com.varify.backend.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.varify.backend.dto.RefereeDecisionResponse;
 import com.varify.backend.dto.VideoUpload;
+import com.varify.backend.service.EvidenceVideoService;
 import com.varify.backend.service.RefereeDecisionService;
 import jakarta.validation.constraints.NotNull;
 import java.io.IOException;
@@ -10,6 +12,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import org.springframework.core.io.FileSystemResource;
+import org.springframework.core.io.Resource;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
@@ -17,6 +22,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -26,9 +32,17 @@ import org.springframework.web.multipart.MultipartFile;
 public class AnalysisController {
 
     private final RefereeDecisionService refereeDecisionService;
+    private final EvidenceVideoService evidenceVideoService;
+    private final ObjectMapper objectMapper;
 
-    public AnalysisController(RefereeDecisionService refereeDecisionService) {
+    public AnalysisController(
+            RefereeDecisionService refereeDecisionService,
+            EvidenceVideoService evidenceVideoService,
+            ObjectMapper objectMapper
+    ) {
         this.refereeDecisionService = refereeDecisionService;
+        this.evidenceVideoService = evidenceVideoService;
+        this.objectMapper = objectMapper;
     }
 
     @GetMapping("/health")
@@ -67,6 +81,44 @@ public class AnalysisController {
             for (Path tempFile : tempFiles) {
                 Files.deleteIfExists(tempFile);
             }
+        }
+    }
+
+    @PostMapping(path = "/evidence-video", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<Resource> generateEvidenceVideo(
+            @RequestPart("video") MultipartFile video,
+            @RequestPart("analysis") String analysisJson
+    ) throws IOException {
+        if (video.isEmpty()) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        RefereeDecisionResponse analysis;
+        try {
+            analysis = objectMapper.readValue(analysisJson, RefereeDecisionResponse.class);
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        Path tempVideo = Files.createTempFile("varify-ev-upload-", suffixFor(video.getOriginalFilename()));
+        try {
+            video.transferTo(tempVideo);
+
+            Path evidenceVideo = evidenceVideoService.generate(tempVideo, analysis);
+
+            Resource resource = new FileSystemResource(evidenceVideo.toFile()) {
+                @Override
+                public String getFilename() {
+                    return "varify-evidence.mp4";
+                }
+            };
+
+            return ResponseEntity.ok()
+                    .contentType(MediaType.parseMediaType("video/mp4"))
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"varify-evidence.mp4\"")
+                    .body(resource);
+        } finally {
+            Files.deleteIfExists(tempVideo);
         }
     }
 

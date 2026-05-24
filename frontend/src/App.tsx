@@ -6,6 +6,9 @@ import {
   useState,
 } from 'react';
 import type { AnalyzeResult, Decision } from './types';
+import PipelineVisualizer from './PipelineVisualizer';
+import { useRocketRidePipeline } from './useRocketRidePipeline';
+import { PIPELINES, type PipelineKey } from './pipelines';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Mock data — used only when the backend is genuinely unreachable, so the
@@ -826,6 +829,14 @@ export default function App() {
   const [originalActiveIndex, setOriginalActiveIndex] = useState(0);
   const [reviewActiveIndex, setReviewActiveIndex] = useState(0);
 
+  // RocketRide Pipeline state
+  const [pipelineEnabled, setPipelineEnabled] = useState(true);
+  const [selectedPipeline, setSelectedPipeline] = useState<PipelineKey>('referee-decision-advanced');
+  const pipelineDef = PIPELINES[selectedPipeline].pipeline;
+  const { state: pipelineState, simulateExecution, reset: resetPipeline } = useRocketRidePipeline({
+    pipeline: pipelineDef,
+  });
+
   // Clamp active indices when the angles list shrinks.
   useEffect(() => {
     const max = Math.max(0, angles.length - 1);
@@ -879,6 +890,11 @@ export default function App() {
     setError(null);
     setResult(null);
 
+    if (pipelineEnabled) {
+      resetPipeline();
+      simulateExecution(8000);
+    }
+
     try {
       const form = new FormData();
       angles.forEach((a) => form.append('video', a.file));
@@ -926,7 +942,7 @@ export default function App() {
         setState('error');
       }
     }
-  }, [angles]);
+  }, [angles, pipelineEnabled, resetPipeline, simulateExecution]);
 
   const uploadPanel = (
     <UploadPanel
@@ -945,6 +961,27 @@ export default function App() {
 
       <main className="varify-shell">
         <HeroHeader />
+
+        {pipelineEnabled && (
+          <section className="varify-pipeline-section">
+            <div className="rr-selector">
+              <span className="rr-selector-label">Pipeline:</span>
+              <select
+                value={selectedPipeline}
+                onChange={(e) => setSelectedPipeline(e.target.value as PipelineKey)}
+                disabled={state === 'analyzing'}
+              >
+                {Object.entries(PIPELINES).map(([key, { name }]) => (
+                  <option key={key} value={key}>{name}</option>
+                ))}
+              </select>
+            </div>
+            <PipelineVisualizer
+              state={pipelineState}
+              pipelineName={PIPELINES[selectedPipeline].name}
+            />
+          </section>
+        )}
 
         <div className="varify-grid">
           {result ? (
@@ -1001,7 +1038,18 @@ export default function App() {
         </div>
 
         <footer className="varify-footer">
-          Upload up to {MAX_ANGLES} angles · Analyze · AI review + referee summary
+          <div className="varify-pipeline-toggle">
+            <span className="varify-pipeline-toggle-label">RocketRide Pipeline</span>
+            <div
+              className={`varify-toggle${pipelineEnabled ? ' is-active' : ''}`}
+              role="switch"
+              aria-checked={pipelineEnabled}
+              tabIndex={0}
+              onClick={() => setPipelineEnabled((v) => !v)}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') setPipelineEnabled((v) => !v); }}
+            />
+          </div>
+          <span>Upload up to {MAX_ANGLES} angles · Analyze · AI review + referee summary</span>
         </footer>
       </main>
     </div>

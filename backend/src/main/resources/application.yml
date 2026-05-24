@@ -14,3 +14,14 @@ varify:
     api-key: ${GMI_API_KEY:}
     base-url: ${GMI_BASE_URL:https://api.gmi-serving.com}
     model: ${GMI_MODEL:}
+  tts:
+    api-key: ${LIVEKIT_API_KEY:}
+    api-secret: ${LIVEKIT_API_SECRET:}
+    base-url: ${LIVEKIT_URL:}
+    model: ${LIVEKIT_TTS_MODEL:cartesia/sonic-3}
+    voice: ${LIVEKIT_TTS_VOICE:}
+    sample-rate: ${LIVEKIT_TTS_SAMPLE_RATE:24000}
+    language: ${LIVEKIT_TTS_LANGUAGE:en}
+  rocketride:
+    api-key: ${ROCKETRIDE_APIKEY:}
+    uri: ${ROCKETRIDE_URI:https://cloud.rocketride.ai}
