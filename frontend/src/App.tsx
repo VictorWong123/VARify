@@ -7,21 +7,10 @@ import {
   useRef,
   useState,
 } from 'react';
-import type { AnalyzeResult, Decision } from './types';
-
-/* ─────────────────────────────────────────────────────────────────────────
-   Mock data — used until the backend is wired up (or as a graceful
-   fallback if /api/analyze isn't reachable). Mirrors the API contract.
-   ───────────────────────────────────────────────────────────────────────── */
-
-const MOCK_RESULT: AnalyzeResult = {
-  decision: 'Yellow Card',
-  decisionSubtitle: 'Rash Unsporting Challenge',
-  reasoning:
-    "Player #14 arrives late and makes contact on the opponent's lower leg with excessive force. This is a reckless challenge and warrants a yellow card.",
-  timestamps: { start: '00:06.8', end: '00:09.2', label: 'Incident start to contact' },
-  confidence: 0.82,
-};
+import type { AnalyzeResult, ApiAnalyzeResponse, ApiEvidenceMoment, Decision } from './types';
+import PipelineVisualizer from './PipelineVisualizer';
+import { useRocketRidePipeline } from './useRocketRidePipeline';
+import { PIPELINES, type PipelineKey } from './pipelines';
 
 /* ─────────────────────────────────────────────────────────────────────────
    Helpers
@@ -31,6 +20,23 @@ function apiUrl(path: string) {
   const baseUrl = (import.meta as any).env?.VITE_API_BASE_URL?.trim();
   if (!baseUrl) return path;
   return `${baseUrl.replace(/\/$/, '')}${path}`;
+}
+
+async function errorMessageFromResponse(response: Response) {
+  const fallback = `Backend responded ${response.status}`;
+  try {
+    const contentType = response.headers.get('content-type') ?? '';
+    if (contentType.includes('application/json')) {
+      const body = await response.json();
+      if (typeof body?.message === 'string' && body.message.trim()) {
+        return body.message;
+      }
+    }
+    const text = await response.text();
+    return text.trim() || fallback;
+  } catch {
+    return fallback;
+  }
 }
 
 function fmtTime(seconds: number) {
@@ -50,6 +56,55 @@ function decisionClass(d: Decision) {
   if (d === 'Red Card') return 'varify-decision-red';
   if (d === 'No Card') return 'varify-decision-green';
   return 'varify-decision-yellow';
+}
+
+function normalizeDecision(decision?: string): Decision {
+  const normalized = (decision ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_');
+  if (normalized === 'RED_CARD') return 'Red Card';
+  if (normalized === 'NO_CARD') return 'No Card';
+  return 'Yellow Card';
+}
+
+function titleCase(value?: string): string {
+  if (!value) return '';
+  return value
+    .replace(/[_-]+/g, ' ')
+    .trim()
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function timestampFromMoment(moment?: ApiEvidenceMoment): string {
+  if (moment?.timestamp) return moment.timestamp;
+  if (typeof moment?.timestampSeconds === 'number') return fmtTime(moment.timestampSeconds);
+  return '';
+}
+
+function normalizeApiResult(data: ApiAnalyzeResponse): AnalyzeResult {
+  const moments = data.evidence?.length ? data.evidence : data.keyMoments ?? [];
+  const primaryMoment = moments.find((moment) => timestampFromMoment(moment)) ?? moments[0];
+  const start =
+    timestampFromMoment(primaryMoment) || data.keyTimestamp || data.keyTimestamps?.[0] || '00:00';
+  const startSeconds =
+    typeof primaryMoment?.timestampSeconds === 'number'
+      ? primaryMoment.timestampSeconds
+      : parseTimestamp(start);
+  const lastMoment = moments[moments.length - 1];
+  const endSeconds =
+    typeof lastMoment?.timestampSeconds === 'number'
+      ? Math.max(lastMoment.timestampSeconds, startSeconds + 2)
+      : startSeconds + 2;
+
+  return {
+    decision: normalizeDecision(data.decision),
+    decisionSubtitle: titleCase(data.ruleCategory) || 'Referee Review',
+    reasoning: data.explanation || data.geminiSummary || 'The model returned a decision without explanation.',
+    timestamps: {
+      start,
+      end: fmtTime(endSeconds),
+      label: primaryMoment?.description || 'Key evidence moment',
+    },
+    confidence: typeof data.confidence === 'number' ? data.confidence : 0,
+  };
 }
 
 const YT_RX = /(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([\w-]{6,})/;
@@ -743,7 +798,15 @@ export default function App() {
   const [evidenceVideoUrl, setEvidenceVideoUrl] = useState<string | null>(null);
   const [evidenceLoading, setEvidenceLoading] = useState(false);
   const [evidenceError, setEvidenceError] = useState<string | null>(null);
-  const rawAnalysisRef = useRef<Record<string, unknown> | null>(null);
+  const rawAnalysisRef = useRef<ApiAnalyzeResponse | null>(null);
+
+  // RocketRide Pipeline state
+  const [pipelineEnabled, setPipelineEnabled] = useState(true);
+  const [selectedPipeline, setSelectedPipeline] = useState<PipelineKey>('referee-decision-advanced');
+  const pipelineDef = PIPELINES[selectedPipeline].pipeline;
+  const { state: pipelineState, simulateExecution, reset: resetPipeline } = useRocketRidePipeline({
+    pipeline: pipelineDef,
+  });
 
   // Manage object URL lifecycle for the uploaded file
   useEffect(() => {
@@ -755,6 +818,12 @@ export default function App() {
     setFileUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [file]);
+
+  useEffect(() => {
+    return () => {
+      if (evidenceVideoUrl) URL.revokeObjectURL(evidenceVideoUrl);
+    };
+  }, [evidenceVideoUrl]);
 
   const ytId = useMemo(() => youTubeId(youtubeUrl.trim()), [youtubeUrl]);
 
@@ -799,42 +868,44 @@ export default function App() {
     setError(null);
     setResult(null);
 
+    if (pipelineEnabled) {
+      resetPipeline();
+      simulateExecution(8000);
+    }
+
     try {
       let response: Response;
       if (file) {
         const form = new FormData();
-        form.append('videoFile', file);
+        form.append('video', file);
         response = await fetch(apiUrl('/api/analyze'), { method: 'POST', body: form });
       } else {
-        response = await fetch(apiUrl('/api/analyze'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ youtubeUrl: youtubeUrl.trim() }),
-        });
+        throw new Error('Upload a video file so VARify can send the clip to the AI models.');
       }
 
       if (!response.ok) {
-        throw new Error(`Backend responded ${response.status}`);
+        throw new Error(await errorMessageFromResponse(response));
       }
-      const data = await response.json();
-      rawAnalysisRef.current = data as Record<string, unknown>;
-      // Brief hold so the analyzing state is perceivable on fast networks.
+      const data = (await response.json()) as ApiAnalyzeResponse;
+      rawAnalysisRef.current = data;
       await new Promise((r) => setTimeout(r, 600));
-      setResult(data as AnalyzeResult);
+      setResult(normalizeApiResult(data));
       setState('ready');
     } catch (e) {
-      // Backend not wired up yet (or unreachable) — fall back to demo data
-      // so the UI flow can still be reviewed.
-      await new Promise((r) => setTimeout(r, 900));
-      setResult(MOCK_RESULT);
-      setState('ready');
       const message = e instanceof Error ? e.message : String(e);
-      console.warn('[VARify] /api/analyze unavailable — showing demo result.', message);
+      rawAnalysisRef.current = null;
+      setResult(null);
+      setError(message);
+      setState('error');
     }
-  }, [file, youtubeUrl]);
+  }, [file, youtubeUrl, pipelineEnabled, resetPipeline, simulateExecution]);
 
   const handleGenerateEvidence = useCallback(async () => {
     if (!file || !result) return;
+    if (!rawAnalysisRef.current) {
+      setEvidenceError('Run a backend analysis before generating an evidence video.');
+      return;
+    }
 
     setEvidenceLoading(true);
     setEvidenceError(null);
@@ -844,10 +915,9 @@ export default function App() {
     }
 
     try {
-      const analysisPayload = rawAnalysisRef.current ?? result;
       const form = new FormData();
       form.append('video', file);
-      form.append('analysis', JSON.stringify(analysisPayload));
+      form.append('analysis', JSON.stringify(rawAnalysisRef.current));
 
       const response = await fetch(apiUrl('/api/evidence-video'), {
         method: 'POST',
@@ -878,6 +948,27 @@ export default function App() {
 
       <main className="varify-shell">
         <HeroHeader />
+
+        {pipelineEnabled && (
+          <section className="varify-pipeline-section">
+            <div className="rr-selector">
+              <span className="rr-selector-label">Pipeline:</span>
+              <select
+                value={selectedPipeline}
+                onChange={(e) => setSelectedPipeline(e.target.value as PipelineKey)}
+                disabled={state === 'analyzing'}
+              >
+                {Object.entries(PIPELINES).map(([key, { name }]) => (
+                  <option key={key} value={key}>{name}</option>
+                ))}
+              </select>
+            </div>
+            <PipelineVisualizer
+              state={pipelineState}
+              pipelineName={PIPELINES[selectedPipeline].name}
+            />
+          </section>
+        )}
 
         <div className="varify-grid">
           {result ? (
@@ -950,7 +1041,18 @@ export default function App() {
         </div>
 
         <footer className="varify-footer">
-          Upload clip · Analyze · AI review + referee summary
+          <div className="varify-pipeline-toggle">
+            <span className="varify-pipeline-toggle-label">RocketRide Pipeline</span>
+            <div
+              className={`varify-toggle${pipelineEnabled ? ' is-active' : ''}`}
+              role="switch"
+              aria-checked={pipelineEnabled}
+              tabIndex={0}
+              onClick={() => setPipelineEnabled((v) => !v)}
+              onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') setPipelineEnabled((v) => !v); }}
+            />
+          </div>
+          <span>Upload clip · Analyze · AI review + referee summary</span>
         </footer>
       </main>
     </div>
